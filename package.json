@@ -14,7 +14,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "create-superadmin": "dotenv -e .env.local -- tsx scripts/create-superadmin.ts"
+    "create-superadmin": "dotenv -e .env.local -- tsx scripts/create-superadmin.ts",
+    "debug-student": "dotenv -e .env.local -- tsx scripts/debug-student.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -15,7 +15,7 @@ import {
   createClassAction,
   updateClassAction,
   type ClassFormState,
-} from "@/app/kelas/action";
+} from "@/app/(protected)/kelas/action";
 
 type Option = { id: string; name: string };
 

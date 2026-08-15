@@ -19,7 +19,9 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { setClassStatusAction } from "@/app/kelas/action";
+import { setClassStatusAction } from "@/app/(protected)/kelas/action";
+import { listStudents } from "@/lib/services/siswa-service";
+import Link from "next/link";
 
 export default async function DetailKelasPage({
   params,
@@ -32,10 +34,12 @@ export default async function DetailKelasPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const [kelas, academicYearOptions, homeroomTeacherOptions] = await Promise.all([
+const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
+  await Promise.all([
     getClassById(id),
     getAcademicYearOptions(),
     getHomeroomTeacherOptions(),
+    listStudents({ search: undefined, classId: id, status: undefined }, 1),
   ]);
 
   if (!kelas) {
@@ -115,10 +119,36 @@ export default async function DetailKelasPage({
       </div>
 
       <div className="rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Siswa di Kelas Ini</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Belum ada data siswa. Fitur pengelolaan siswa akan aktif pada Phase 5.
-        </p>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            Siswa di Kelas Ini ({studentsInClass.total})
+          </h2>
+          <div className="flex gap-2">
+            <Button variant="outline" render={<Link href={`/siswa?classId=${id}`} />}>
+              Lihat Semua
+            </Button>
+            <Button render={<Link href={`/siswa/tambah?classId=${id}`} />}>
+              + Tambah Siswa
+            </Button>
+          </div>
+        </div>
+
+        {studentsInClass.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Belum ada siswa di kelas ini.</p>
+        ) : (
+          <ul className="divide-y">
+            {studentsInClass.data.map((siswa) => (
+              <li key={siswa.id} className="flex items-center justify-between py-2 text-sm">
+                <Link href={`/siswa/${siswa.id}`} className="hover:underline">
+                  {siswa.name} <span className="text-muted-foreground">({siswa.nis})</span>
+                </Link>
+                <Badge variant={siswa.status === "ACTIVE" ? "default" : "outline"}>
+                  {siswa.status === "ACTIVE" ? "Aktif" : "Nonaktif"}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

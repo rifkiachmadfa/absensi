@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import {
   createAcademicYearAction,
   type AcademicYearFormState,
-} from "@/app/tahun-ajaran/actions";
+} from "@/app/(protected)/tahun-ajaran/actions";
 
 const initialState: AcademicYearFormState = {};
 
