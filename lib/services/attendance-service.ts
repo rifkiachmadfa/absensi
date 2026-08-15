@@ -7,11 +7,32 @@ import {
   AuditAction,
 } from "@/app/generated/prisma/client";
 
+// ============================================================
+// Types
+// ============================================================
+
 export type CheckInResult =
   | { type: "SUCCESS"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "STUDENT_NOT_FOUND" }
   | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+
+export type SetManualStatusResult =
+  | {
+      type: "SUCCESS";
+      attendanceId: string;
+      previousStatus: AttendanceStatus | null;
+      newStatus: AttendanceStatus;
+    }
+  | { type: "STUDENT_NOT_FOUND" }
+  | { type: "FUTURE_DATE_NOT_ALLOWED" };
+
+export type DailyRecap = {
+  date: string;
+  totalSiswa: number;
+  counts: Record<AttendanceStatus | "BELUM_ABSEN", number>;
+  belumAbsen: { id: string; name: string; className: string }[];
+};
 
 type StudentSummary = {
   id: string;
@@ -19,6 +40,10 @@ type StudentSummary = {
   nisn: string;
   className: string;
 };
+
+// ============================================================
+// Internal helpers
+// ============================================================
 
 const TIMEZONE = "Asia/Jakarta";
 
@@ -34,7 +59,7 @@ function getJakartaNow() {
   return { serverTime: now, dayOfWeek: local.getDay(), hhmm };
 }
 
-function getTodayDateOnly() {
+function getTodayDateOnly(): Date {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE });
   return new Date(`${formatter.format(new Date())}T00:00:00.000Z`);
 }
@@ -53,7 +78,12 @@ async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<Attendanc
   return hhmm <= lateAfter ? AttendanceStatus.HADIR : AttendanceStatus.TERLAMBAT;
 }
 
-function toSummary(student: { id: string; name: string; nisn: string | null; class: { name: string } }): StudentSummary {
+function toSummary(student: {
+  id: string;
+  name: string;
+  nisn: string | null;
+  class: { name: string };
+}): StudentSummary {
   return {
     id: student.id,
     name: student.name,
@@ -62,7 +92,79 @@ function toSummary(student: { id: string; name: string; nisn: string | null; cla
   };
 }
 
+// ============================================================
+// AttendanceService
+// Satu-satunya pintu masuk logic absensi. Dipakai oleh:
+// - QR Scan (Phase 7)
+// - Input manual (Phase 7)
+// - Perubahan status oleh admin/wali kelas (Phase 8)
+// - Rekap harian untuk dashboard & laporan (Phase 8)
+// Jangan buat logic absensi terpisah di luar service ini.
+// ============================================================
+
 export class AttendanceService {
+
+    /**
+   * Tabel rekap absensi untuk /absensi: menggabungkan record Attendance
+   * dengan siswa yang belum punya record (BELUM_ABSEN), untuk satu tanggal.
+   * Diurutkan: yang sudah check-in terbaru dulu, lalu BELUM_ABSEN by nama.
+   */
+  static async getAttendanceTable(params: {
+    date: Date;
+    classId?: string;
+    studentId?: string;
+    status?: string;
+  }) {
+    const { date, classId, studentId, status } = params;
+
+    const students = await prisma.student.findMany({
+      where: {
+        status: StudentStatus.ACTIVE,
+        ...(classId ? { classId } : {}),
+        ...(studentId ? { id: studentId } : {}),
+      },
+      select: { id: true, name: true, nisn: true, class: { select: { name: true } } },
+      orderBy: { name: "asc" },
+    });
+
+    const studentIds = students.map((s) => s.id);
+
+    const attendances = await prisma.attendance.findMany({
+      where: { date, studentId: { in: studentIds } },
+    });
+    const byStudent = new Map(attendances.map((a) => [a.studentId, a]));
+
+    let rows = students.map((s) => {
+      const a = byStudent.get(s.id);
+      return {
+        studentId: s.id,
+        attendanceId: a?.id ?? null,
+        name: s.name,
+        nisn: s.nisn ?? "-",
+        className: s.class.name,
+        status: a?.status ?? ("BELUM_ABSEN" as const),
+        checkInAt: a?.checkInAt.toISOString() ?? null,
+      };
+    });
+
+    if (status) {
+      rows = rows.filter((r) => r.status === status);
+    }
+
+    rows.sort((a, b) => {
+      if (a.checkInAt && b.checkInAt) return b.checkInAt.localeCompare(a.checkInAt);
+      if (a.checkInAt) return -1;
+      if (b.checkInAt) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return rows;
+  }
+  /**
+   * Absen masuk via QR Scan atau input manual.
+   * Waktu SELALU diambil dari server, tidak pernah dari client.
+   * Status ditentukan otomatis berdasarkan AttendanceSchedule / SchoolSetting.
+   */
   static async checkIn(params: {
     identifier: string; // qrToken (QR) atau studentId (MANUAL)
     method: AttendanceMethod;
@@ -100,7 +202,10 @@ export class AttendanceService {
         await tx.auditLog.create({
           data: {
             userId: recordedById,
-            action: method === AttendanceMethod.QR ? AuditAction.ATTENDANCE_SCAN : AuditAction.ATTENDANCE_MANUAL,
+            action:
+              method === AttendanceMethod.QR
+                ? AuditAction.ATTENDANCE_SCAN
+                : AuditAction.ATTENDANCE_MANUAL,
             entity: "Attendance",
             entityId: created.id,
             description: `Absen ${student.name} (${student.class.name}) - ${status}`,
@@ -117,6 +222,9 @@ export class AttendanceService {
         status: attendance.status,
       };
     } catch (err) {
+      // Unique constraint (studentId + date) -> sudah absen hari ini.
+      // Ditangkap di sini untuk melindungi dari race condition saat burst request
+      // (banyak siswa scan bersamaan saat jam masuk sekolah).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         const existing = await prisma.attendance.findUnique({
           where: { studentId_date: { studentId: student.id, date } },
@@ -132,6 +240,9 @@ export class AttendanceService {
     }
   }
 
+  /**
+   * Cari siswa aktif berdasarkan nama/NIS/NISN untuk input manual.
+   */
   static async searchStudents(query: string) {
     return prisma.student.findMany({
       where: {
@@ -145,5 +256,138 @@ export class AttendanceService {
       include: { class: true },
       take: 10,
     });
+  }
+
+  /**
+   * Set atau ubah status absensi secara manual (admin/wali kelas).
+   * Dipakai untuk: BELUM_ABSEN -> SAKIT/IZIN/DISPENSASI/ALPHA,
+   * atau koreksi status yang salah.
+   * Selalu tercatat di AuditLog dengan status lama -> baru.
+   *
+   * Catatan: jika belum ada record (siswa BELUM_ABSEN), checkInAt diisi waktu
+   * server saat admin melakukan input -- ini BUKAN jam kehadiran fisik siswa,
+   * hanya timestamp administratif. Schema saat ini mewajibkan checkInAt diisi.
+   */
+  static async setManualStatus(params: {
+    studentId: string;
+    date: Date; // date-only, jam 00:00:00.000Z
+    newStatus: AttendanceStatus;
+    updatedById: string;
+  }): Promise<SetManualStatusResult> {
+    const { studentId, date, newStatus, updatedById } = params;
+
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) return { type: "STUDENT_NOT_FOUND" };
+
+    const today = getTodayDateOnly();
+    if (date.getTime() > today.getTime()) {
+      return { type: "FUTURE_DATE_NOT_ALLOWED" };
+    }
+
+    const existing = await prisma.attendance.findUnique({
+      where: { studentId_date: { studentId, date } },
+    });
+
+    const result = await prisma.$transaction(async (tx) => {
+      const attendance = existing
+        ? await tx.attendance.update({
+            where: { id: existing.id },
+            data: { status: newStatus },
+          })
+        : await tx.attendance.create({
+            data: {
+              studentId,
+              date,
+              checkInAt: new Date(),
+              status: newStatus,
+              method: AttendanceMethod.MANUAL,
+              recordedById: updatedById,
+            },
+          });
+
+      await tx.auditLog.create({
+        data: {
+          userId: updatedById,
+          action: AuditAction.STATUS_CHANGE,
+          entity: "Attendance",
+          entityId: attendance.id,
+          description: existing
+            ? `Ubah status ${student.name}: ${existing.status} -> ${newStatus}`
+            : `Set status ${student.name}: BELUM_ABSEN -> ${newStatus}`,
+        },
+      });
+
+      return attendance;
+    });
+
+    return {
+      type: "SUCCESS",
+      attendanceId: result.id,
+      previousStatus: existing?.status ?? null,
+      newStatus: result.status,
+    };
+  }
+
+  /**
+   * Rekap harian yang benar: termasuk siswa yang belum punya record (BELUM_ABSEN).
+   * Dipakai oleh dashboard (Section 7) dan laporan (Section 16-17).
+   */
+  static async getDailyRecap(params: { date: Date; classId?: string }): Promise<DailyRecap> {
+    const { date, classId } = params;
+
+    const students = await prisma.student.findMany({
+      where: {
+        status: StudentStatus.ACTIVE,
+        ...(classId ? { classId } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        nisn: true,
+        class: { select: { id: true, name: true } },
+      },
+    });
+
+    const studentIds = students.map((s) => s.id);
+
+    const attendances = await prisma.attendance.findMany({
+      where: { date, studentId: { in: studentIds } },
+      select: { studentId: true, status: true, checkInAt: true },
+    });
+
+    const attendanceByStudent = new Map(attendances.map((a) => [a.studentId, a]));
+
+    const counts: Record<AttendanceStatus | "BELUM_ABSEN", number> = {
+      HADIR: 0,
+      TERLAMBAT: 0,
+      SAKIT: 0,
+      IZIN: 0,
+      DISPENSASI: 0,
+      ALPHA: 0,
+      BELUM_ABSEN: 0,
+    };
+
+    const belumAbsenList: { id: string; name: string; className: string }[] = [];
+
+    for (const student of students) {
+      const attendance = attendanceByStudent.get(student.id);
+      if (!attendance) {
+        counts.BELUM_ABSEN += 1;
+        belumAbsenList.push({
+          id: student.id,
+          name: student.name,
+          className: student.class.name,
+        });
+        continue;
+      }
+      counts[attendance.status] += 1;
+    }
+
+    return {
+      date: date.toISOString().slice(0, 10),
+      totalSiswa: students.length,
+      counts,
+      belumAbsen: belumAbsenList,
+    };
   }
 }

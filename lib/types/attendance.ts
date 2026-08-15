@@ -13,3 +13,15 @@ export type AttendanceCheckInResponse =
     }
   | { type: "STUDENT_INACTIVE"; student: { name: string } }
   | { type: "STUDENT_NOT_FOUND"; message?: string };
+
+export type AttendanceTableRow = {
+  studentId: string;
+  attendanceId: string | null;
+  name: string;
+  nisn: string;
+  className: string;
+  status: "HADIR" | "TERLAMBAT" | "SAKIT" | "IZIN" | "DISPENSASI" | "ALPHA" | "BELUM_ABSEN";
+  checkInAt: string | null;
+};
+
+export type ClassOption = { id: string; name: string };
