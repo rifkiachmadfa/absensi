@@ -68,7 +68,12 @@ export default async function SiswaPage({
             {total} siswa terdaftar.
           </p>
         </div>
-        <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" render={<Link href="/kartu-siswa" />}>
+            Kartu Siswa
+          </Button>
+          <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
+        </div>
       </div>
 
       {classOptions.length === 0 && (
@@ -143,12 +148,13 @@ export default async function SiswaPage({
               <TableHead>NISN</TableHead>
               <TableHead>Kelas</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="text-right">Aksi</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {students.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Belum ada data siswa.
                 </TableCell>
               </TableRow>
@@ -167,6 +173,15 @@ export default async function SiswaPage({
                   <Badge variant={siswa.status === "ACTIVE" ? "default" : "outline"}>
                     {siswa.status === "ACTIVE" ? "Aktif" : "Nonaktif"}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    render={<Link href={`/kartu-siswa?studentId=${siswa.id}`} />}
+                  >
+                    Kartu
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}

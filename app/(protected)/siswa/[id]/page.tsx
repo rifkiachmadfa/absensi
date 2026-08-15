@@ -15,6 +15,7 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { setStudentStatusAction } from "@/app/(protected)/siswa/action";
+import Link from "next/link";
 
 export default async function DetailSiswaPage({
   params,
@@ -86,7 +87,15 @@ export default async function DetailSiswaPage({
           </p>
         </div>
 
-        <AlertDialog>
+<div className="flex gap-2">
+          <Button
+            variant="outline"
+            render={<Link href={`/kartu-siswa?studentId=${siswa.id}`} />}
+          >
+            Lihat / Cetak Kartu
+          </Button>
+
+          <AlertDialog>
           <AlertDialogTrigger
             render={
               <Button variant={siswa.status === "ACTIVE" ? "destructive" : "outline"} />
@@ -112,9 +121,10 @@ export default async function DetailSiswaPage({
               <form action={setStudentStatusAction.bind(null, id, nextStatus)}>
                 <AlertDialogAction type="submit">Ya, Lanjutkan</AlertDialogAction>
               </form>
-            </AlertDialogFooter>
+</AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
 
       {error && (

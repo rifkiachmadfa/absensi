@@ -64,7 +64,15 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
           </p>
         </div>
 
-        <AlertDialog>
+<div className="flex gap-2">
+          <Button
+            variant="outline"
+            render={<Link href={`/kartu-siswa?classId=${kelas.id}`} />}
+          >
+            Cetak Kartu Kelas
+          </Button>
+
+          <AlertDialog>
             <AlertDialogTrigger
             render={
                 <Button
@@ -90,9 +98,10 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
               <form action={setClassStatusAction.bind(null, id, nextStatus)}>
                 <AlertDialogAction type="submit">Ya, Lanjutkan</AlertDialogAction>
               </form>
-            </AlertDialogFooter>
+</AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
 
       {error && (

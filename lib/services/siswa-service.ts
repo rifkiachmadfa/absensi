@@ -76,6 +76,30 @@ export async function getStudentById(id: string) {
   });
 }
 
+/**
+ * Mengambil daftar siswa untuk keperluan cetak kartu.
+ * Digunakan oleh modul Kartu Siswa (/kartu-siswa).
+ *
+ * - classId diisi  -> seluruh siswa aktif pada kelas tersebut.
+ * - classId kosong -> seluruh siswa aktif di semua kelas.
+ *
+ * Sengaja tidak dipaginasi (halaman cetak butuh seluruh data sekaligus),
+ * namun tetap dibatasi hanya siswa berstatus ACTIVE karena kartu siswa
+ * nonaktif tidak relevan untuk dicetak massal.
+ */
+export async function getStudentsForCardPrint(params: { classId?: string }) {
+  return prisma.student.findMany({
+    where: {
+      status: "ACTIVE",
+      classId: params.classId || undefined,
+    },
+    include: {
+      class: { select: { id: true, name: true } },
+    },
+    orderBy: [{ class: { name: "asc" } }, { name: "asc" }],
+  });
+}
+
 export async function getClassOptions() {
   return prisma.class.findMany({
     select: { id: true, name: true, status: true },
