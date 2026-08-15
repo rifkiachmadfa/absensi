@@ -30,6 +30,7 @@ enum AttendanceStatus {
   SAKIT
   IZIN
   DISPENSASI
+  ALPHA
 }
 
 enum AttendanceMethod {
