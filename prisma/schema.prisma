@@ -1,0 +1,172 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPERADMIN
+  ADMIN
+  GURU
+  WALI_KELAS
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  HADIR
+  TERLAMBAT
+  SAKIT
+  IZIN
+  DISPENSASI
+}
+
+enum AttendanceMethod {
+  QR
+  MANUAL
+}
+
+enum AcademicYearStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ATTENDANCE_SCAN
+  ATTENDANCE_MANUAL
+  STATUS_CHANGE
+}
+
+model User {
+  id        String   @id
+  email     String   @unique
+  name      String
+  role      UserRole @default(GURU)
+  isActive  Boolean  @default(true)
+
+  attendances Attendance[] @relation("RecordedBy")
+  auditLogs   AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AcademicYear {
+  id        String             @id @default(cuid())
+  name      String             @unique
+  status    AcademicYearStatus @default(INACTIVE)
+
+  classes Class[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Class {
+  id             String       @id @default(cuid())
+  name           String
+  academicYearId String
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  students     Student[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, academicYearId])
+  @@index([academicYearId])
+}
+
+model Student {
+  id        String        @id @default(cuid())
+  nis       String        @unique
+  nisn      String?       @unique
+  name      String
+  qrToken   String        @unique
+  status    StudentStatus @default(ACTIVE)
+
+  classId String
+  class   Class @relation(fields: [classId], references: [id])
+
+  attendances Attendance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classId])
+  @@index([name])
+}
+
+model Attendance {
+  id        String            @id @default(cuid())
+  studentId String
+  date      DateTime
+  checkInAt DateTime
+  status    AttendanceStatus
+  method    AttendanceMethod
+
+  recordedById String?
+  recordedBy   User? @relation("RecordedBy", fields: [recordedById], references: [id])
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, date])
+  @@index([date])
+  @@index([studentId])
+  @@index([recordedById])
+}
+
+model AttendanceSchedule {
+  id             String  @id @default(cuid())
+  dayOfWeek      Int
+  checkInStart   String
+  lateAfter      String
+  isActive       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dayOfWeek])
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  userId      String?
+  action      AuditAction
+  entity      String
+  entityId    String?
+  description String?
+
+  user User? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model SchoolSetting {
+  id                 String @id @default(cuid())
+  schoolName         String
+  timezone           String @default("Asia/Jakarta")
+  defaultCheckInTime String @default("07:00")
+  lateAfter          String @default("07:15")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
