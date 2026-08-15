@@ -11,11 +11,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint",
-    "create-superadmin": "dotenv -e .env.local -- tsx scripts/create-superadmin.ts",
-    "debug-student": "dotenv -e .env.local -- tsx scripts/debug-student.ts"
+    "lint": "eslint"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
