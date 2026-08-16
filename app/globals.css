@@ -38,6 +38,21 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+
+    /* Modern School — status semantic tokens (UI_RULES §3–4) */
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-success-bg: var(--success-bg);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning-bg: var(--warning-bg);
+    --color-danger: var(--danger);
+    --color-danger-foreground: var(--danger-foreground);
+    --color-danger-bg: var(--danger-bg);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-info-bg: var(--info-bg);
+
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -48,72 +63,106 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+    /* ===== Modern School Design Tokens (UI_RULES §3) ===== */
+    --background: #F8FAFC;
+    --foreground: #0F172A;
+    --card: #FFFFFF;
+    --card-foreground: #0F172A;
+    --popover: #FFFFFF;
+    --popover-foreground: #0F172A;
+    --primary: #2563EB;
+    --primary-foreground: #FFFFFF;
+    --secondary: #F1F5F9;
+    --secondary-foreground: #0F172A;
+    --muted: #F1F5F9;
+    --muted-foreground: #64748B;
+    --accent: #EFF6FF;
+    --accent-foreground: #1D4ED8;
+    --destructive: #DC2626;
+    --border: #E2E8F0;
+    --input: #E2E8F0;
+    --ring: #2563EB;
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+
+    --chart-1: #16A34A;
+    --chart-2: #D97706;
+    --chart-3: #DC2626;
+    --chart-4: #2563EB;
+    --chart-5: #64748B;
+
+    --sidebar: #FFFFFF;
+    --sidebar-foreground: #0F172A;
+    --sidebar-primary: #2563EB;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #EFF6FF;
+    --sidebar-accent-foreground: #1D4ED8;
+    --sidebar-border: #E2E8F0;
+    --sidebar-ring: #2563EB;
+
+    /* Status colors — UI_RULES §3 & §4 (blue=action, green=hadir, amber=terlambat, red=alpha) */
+    --success: #16A34A;
+    --success-foreground: #FFFFFF;
+    --success-bg: #F0FDF4;
+    --warning: #D97706;
+    --warning-foreground: #FFFFFF;
+    --warning-bg: #FFFBEB;
+    --danger: #DC2626;
+    --danger-foreground: #FFFFFF;
+    --danger-bg: #FEF2F2;
+    --info: #2563EB;
+    --info-foreground: #FFFFFF;
+    --info-bg: #EFF6FF;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #0B1220;
+    --foreground: #F1F5F9;
+    --card: #111827;
+    --card-foreground: #F1F5F9;
+    --popover: #111827;
+    --popover-foreground: #F1F5F9;
+    --primary: #3B82F6;
+    --primary-foreground: #FFFFFF;
+    --secondary: #1E293B;
+    --secondary-foreground: #F1F5F9;
+    --muted: #1E293B;
+    --muted-foreground: #94A3B8;
+    --accent: #172554;
+    --accent-foreground: #93C5FD;
+    --destructive: #EF4444;
+    --border: rgba(255, 255, 255, 0.1);
+    --input: rgba(255, 255, 255, 0.15);
+    --ring: #3B82F6;
+
+    --chart-1: #22C55E;
+    --chart-2: #F59E0B;
+    --chart-3: #EF4444;
+    --chart-4: #3B82F6;
+    --chart-5: #94A3B8;
+
+    --sidebar: #111827;
+    --sidebar-foreground: #F1F5F9;
+    --sidebar-primary: #3B82F6;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #172554;
+    --sidebar-accent-foreground: #93C5FD;
+    --sidebar-border: rgba(255, 255, 255, 0.1);
+    --sidebar-ring: #3B82F6;
+
+    --success: #22C55E;
+    --success-foreground: #FFFFFF;
+    --success-bg: #052e1a;
+    --warning: #F59E0B;
+    --warning-foreground: #1F2937;
+    --warning-bg: #3a2a06;
+    --danger: #EF4444;
+    --danger-foreground: #FFFFFF;
+    --danger-bg: #3a0a0a;
+    --info: #3B82F6;
+    --info-foreground: #FFFFFF;
+    --info-bg: #0c1f3d;
 }
 
 @layer base {

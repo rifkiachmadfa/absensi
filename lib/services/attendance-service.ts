@@ -4,6 +4,7 @@ import {
   AttendanceStatus,
   AttendanceMethod,
   StudentStatus,
+  ClassStatus,
   AuditAction,
 } from "@/app/generated/prisma/client";
 
@@ -34,6 +35,29 @@ export type DailyRecap = {
   belumAbsen: { id: string; name: string; className: string }[];
 };
 
+// Dashboard (Phase 9) — statistik per kelas untuk hari tertentu.
+export type ClassBreakdown = {
+  classId: string;
+  className: string;
+  totalSiswa: number;
+  hadir: number;
+  terlambat: number;
+  belumAbsen: number;
+  lainnya: number; // SAKIT + IZIN + DISPENSASI + ALPHA
+  persentaseHadir: number; // (hadir + terlambat) / totalSiswa * 100, dibulatkan
+};
+
+// Dashboard (Phase 9) — daftar aktivitas absensi terbaru.
+export type RecentAttendanceItem = {
+  id: string;
+  studentName: string;
+  className: string;
+  status: AttendanceStatus;
+  method: AttendanceMethod;
+  checkInAt: string;
+  recordedByName: string;
+};
+
 type StudentSummary = {
   id: string;
   name: string;
@@ -59,7 +83,10 @@ function getJakartaNow() {
   return { serverTime: now, dayOfWeek: local.getDay(), hhmm };
 }
 
-function getTodayDateOnly(): Date {
+// Diekspor agar dipakai halaman dashboard untuk menentukan "hari ini"
+// dengan definisi yang SAMA PERSIS dengan yang dipakai AttendanceService.
+// Jangan buat helper tanggal duplikat di tempat lain.
+export function getTodayDateOnly(): Date {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE });
   return new Date(`${formatter.format(new Date())}T00:00:00.000Z`);
 }
@@ -98,7 +125,8 @@ function toSummary(student: {
 // - QR Scan (Phase 7)
 // - Input manual (Phase 7)
 // - Perubahan status oleh admin/wali kelas (Phase 8)
-// - Rekap harian untuk dashboard & laporan (Phase 8)
+// - Rekap harian, statistik per kelas & aktivitas terbaru untuk
+//   dashboard (Phase 9) dan laporan (Phase 10)
 // Jangan buat logic absensi terpisah di luar service ini.
 // ============================================================
 
@@ -389,5 +417,107 @@ export class AttendanceService {
       counts,
       belumAbsen: belumAbsenList,
     };
+  }
+
+  /**
+   * Breakdown kehadiran per kelas untuk satu tanggal.
+   * Dipakai dashboard (Section 7 & 31) untuk "Statistik per kelas".
+   * 2 query saja (kelas + attendance), grouping dilakukan di memori —
+   * aman untuk skala ±500 siswa (Section 38).
+   */
+  static async getClassBreakdown(params: {
+    date: Date;
+    classId?: string;
+  }): Promise<ClassBreakdown[]> {
+    const { date, classId } = params;
+
+    const classes = await prisma.class.findMany({
+      where: {
+        status: ClassStatus.ACTIVE,
+        ...(classId ? { id: classId } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        students: {
+          where: { status: StudentStatus.ACTIVE },
+          select: { id: true },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const studentIds = classes.flatMap((k) => k.students.map((s) => s.id));
+
+    const attendances = await prisma.attendance.findMany({
+      where: { date, studentId: { in: studentIds } },
+      select: { studentId: true, status: true },
+    });
+    const statusByStudent = new Map(attendances.map((a) => [a.studentId, a.status]));
+
+    return classes.map((kelas) => {
+      let hadir = 0;
+      let terlambat = 0;
+      let belumAbsen = 0;
+      let lainnya = 0;
+
+      for (const s of kelas.students) {
+        const status = statusByStudent.get(s.id);
+        if (!status) belumAbsen += 1;
+        else if (status === AttendanceStatus.HADIR) hadir += 1;
+        else if (status === AttendanceStatus.TERLAMBAT) terlambat += 1;
+        else lainnya += 1;
+      }
+
+      const totalSiswa = kelas.students.length;
+      const persentaseHadir =
+        totalSiswa > 0 ? Math.round(((hadir + terlambat) / totalSiswa) * 100) : 0;
+
+      return {
+        classId: kelas.id,
+        className: kelas.name,
+        totalSiswa,
+        hadir,
+        terlambat,
+        belumAbsen,
+        lainnya,
+        persentaseHadir,
+      };
+    });
+  }
+
+  /**
+   * Aktivitas absensi terbaru pada satu tanggal (default: hari ini).
+   * Dipakai dashboard (Section 7) untuk panel "Absensi Terbaru".
+   */
+  static async getRecentActivity(params: {
+    date: Date;
+    limit?: number;
+    classId?: string;
+  }): Promise<RecentAttendanceItem[]> {
+    const { date, limit = 8, classId } = params;
+
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        date,
+        ...(classId ? { student: { classId } } : {}),
+      },
+      include: {
+        student: { select: { name: true, class: { select: { name: true } } } },
+        recordedBy: { select: { name: true } },
+      },
+      orderBy: { checkInAt: "desc" },
+      take: limit,
+    });
+
+    return attendances.map((a) => ({
+      id: a.id,
+      studentName: a.student.name,
+      className: a.student.class.name,
+      status: a.status,
+      method: a.method,
+      checkInAt: a.checkInAt.toISOString(),
+      recordedByName: a.recordedBy?.name ?? "-",
+    }));
   }
 }
