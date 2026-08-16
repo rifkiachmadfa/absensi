@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Html5Qrcode, Html5QrcodeScannerState } from "html5-qrcode";
+import { Spinner } from "@/components/ui/spinner";
 
 const SCAN_COOLDOWN_MS = 3000;
 
@@ -80,17 +81,17 @@ export function QrScanner({ onDetected, isProcessing }: QrScannerProps) {
         id={containerId}
         className="mx-auto aspect-square w-full max-w-sm overflow-hidden rounded-2xl bg-black"
       />
-      {isStarting && (
-        <p className="mt-3 text-center text-sm text-muted-foreground">
-          Mengaktifkan kamera...
+{isStarting && (
+        <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Spinner /> Mengaktifkan kamera...
         </p>
       )}
       {cameraError && (
         <p className="mt-3 text-center text-sm text-destructive">{cameraError}</p>
       )}
       {isProcessing && (
-        <p className="mt-3 text-center text-sm text-muted-foreground">
-          Memproses...
+        <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Spinner /> Memproses...
         </p>
       )}
     </div>

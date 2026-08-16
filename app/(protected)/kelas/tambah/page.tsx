@@ -17,7 +17,7 @@ export default async function TambahKelasPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">Tambah Kelas</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Tambah Kelas</h1>
         <p className="text-sm text-muted-foreground">
           Buat data kelas baru untuk tahun ajaran yang sudah tersedia.
         </p>

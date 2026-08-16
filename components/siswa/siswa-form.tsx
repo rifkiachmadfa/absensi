@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import {
   createStudentAction,
   updateStudentAction,
@@ -112,6 +113,7 @@ export function SiswaForm({
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
       <Button type="submit" disabled={isPending}>
+        {isPending && <Spinner />}
         {isPending ? "Menyimpan..." : mode === "edit" ? "Simpan Perubahan" : "Tambah Siswa"}
       </Button>
     </form>

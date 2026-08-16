@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MANUAL_SETTABLE_STATUSES, STATUS_LABEL } from "@/lib/constants/attendance";
+import { Spinner } from "@/components/ui/spinner"
 
 export function StatusDropdown({
   studentId,
@@ -44,7 +45,8 @@ export function StatusDropdown({
     <Button variant="outline" size="sm" disabled={isSaving} />
   }
 >
-  Ubah Status
+  {isSaving && <Spinner />}
+  {isSaving ? "Menyimpan..." : "Ubah Status"}
 </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {MANUAL_SETTABLE_STATUSES.filter((s) => s !== currentStatus).map((s) => (

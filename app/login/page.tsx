@@ -5,7 +5,7 @@ import { loginAction, type LoginState } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
+import { Spinner } from "@/components/ui/spinner";
 const initialState: LoginState = {};
 
 export default function LoginPage() {
@@ -51,8 +51,9 @@ export default function LoginPage() {
             <p className="text-sm text-destructive">{state.error}</p>
           )}
 
-          <Button type="submit" className="w-full" disabled={isPending}>
-            {isPending ? "Memproses..." : "Masuk"}
+            <Button type="submit" className="w-full" disabled={isPending}>
+              {isPending && <Spinner />}
+              {isPending ? "Memproses..." : "Masuk"}
           </Button>
         </form>
       </div>

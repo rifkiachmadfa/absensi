@@ -63,7 +63,7 @@ export default async function SiswaPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Siswa</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Siswa</h1>
           <p className="text-sm text-muted-foreground">
             {total} siswa terdaftar.
           </p>

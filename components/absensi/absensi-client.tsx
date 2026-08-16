@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -73,9 +74,9 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
   const colSpan = canEditStatus ? 6 : 5;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6">
+    <div className="mx-auto max-w-5xl">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl font-bold">Absensi Siswa</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Absensi Siswa</h1>
         <ScanDialog onSuccess={loadTable} />
       </div>
 
@@ -131,11 +132,15 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr>
-                <td colSpan={colSpan} className="p-6 text-center text-muted-foreground">
-                  Memuat data...
-                </td>
-              </tr>
+              Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i} className="border-t">
+                  {Array.from({ length: colSpan }).map((_, c) => (
+                    <td key={c} className="p-3">
+                      <Skeleton className="h-4 w-full max-w-24" />
+                    </td>
+                  ))}
+                </tr>
+              ))
             ) : filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={colSpan} className="p-6 text-center text-muted-foreground">

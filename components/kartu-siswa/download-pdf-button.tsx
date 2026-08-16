@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { StudentIdCardData } from "@/components/kartu-siswa/student-id-card";
-
+import { Spinner } from "@/components/ui/spinner";
 export function DownloadPdfButton({
   cards,
   schoolName,
@@ -37,7 +37,7 @@ export function DownloadPdfButton({
       onClick={handleDownload}
       disabled={isGenerating || cards.length === 0}
     >
-      <Download className="mr-2 h-4 w-4" />
+      {isGenerating ? <Spinner className="mr-2" /> : <Download className="mr-2 h-4 w-4" />}
       {isGenerating ? "Menyiapkan PDF..." : label}
     </Button>
   );

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanResult } from "@/components/absensi/scan-result";
 import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
+import { Spinner } from "@/components/ui/spinner"
 
 type Student = { id: string; name: string; nisn: string; className: string };
 
@@ -120,7 +121,8 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
                     <p className="font-medium">{s.name}</p>
                     <p className="text-sm text-muted-foreground">{s.className}</p>
                   </div>
-                  <Button size="sm" disabled={isProcessing} onClick={() => submitManual(s.id)}>
+<Button size="sm" disabled={isProcessing} onClick={() => submitManual(s.id)}>
+                    {isProcessing && <Spinner />}
                     Absenkan
                   </Button>
                 </div>

@@ -1,8 +1,11 @@
+import { notFound } from "next/navigation";
+import Link from "next/link";
 import { requireRole } from "@/lib/auth/guard";
 import { getStudentById, getClassOptions } from "@/lib/services/siswa-service";
 import { SiswaForm } from "@/components/siswa/siswa-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -11,11 +14,9 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogDescription,
-  AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { setStudentStatusAction } from "@/app/(protected)/siswa/action";
-import Link from "next/link";
 
 export default async function DetailSiswaPage({
   params,
@@ -28,42 +29,10 @@ export default async function DetailSiswaPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  // === DEBUG SEMENTARA ===
-  const debugInfo: Record<string, unknown> = {
-    receivedId: id,
-    idLength: id.length,
-    idCharCodes: Array.from(id).map((c) => c.charCodeAt(0)),
-  };
-
-  let siswa;
-  try {
-    siswa = await getStudentById(id);
-    debugInfo.queryResult = siswa;
-    debugInfo.queryError = null;
-  } catch (err) {
-    siswa = null;
-    debugInfo.queryResult = null;
-    debugInfo.queryError = err instanceof Error ? err.message : String(err);
-    debugInfo.queryErrorStack = err instanceof Error ? err.stack : null;
-  }
-
+  const siswa = await getStudentById(id);
   if (!siswa) {
-    return (
-      <pre
-        style={{
-          whiteSpace: "pre-wrap",
-          padding: 16,
-          fontSize: 12,
-          background: "#111",
-          color: "#0f0",
-          borderRadius: 8,
-        }}
-      >
-        {JSON.stringify(debugInfo, null, 2)}
-      </pre>
-    );
+    notFound();
   }
-  // === END DEBUG ===
 
   const classOptions = await getClassOptions();
   const nextStatus = siswa.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
@@ -73,7 +42,7 @@ export default async function DetailSiswaPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold">{siswa.name}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">{siswa.name}</h1>
             <Badge variant={siswa.status === "ACTIVE" ? "default" : "outline"}>
               {siswa.status === "ACTIVE" ? "Aktif" : "Nonaktif"}
             </Badge>
@@ -87,7 +56,7 @@ export default async function DetailSiswaPage({
           </p>
         </div>
 
-<div className="flex gap-2">
+        <div className="flex gap-2">
           <Button
             variant="outline"
             render={<Link href={`/kartu-siswa?studentId=${siswa.id}`} />}
@@ -96,34 +65,34 @@ export default async function DetailSiswaPage({
           </Button>
 
           <AlertDialog>
-          <AlertDialogTrigger
-            render={
-              <Button variant={siswa.status === "ACTIVE" ? "destructive" : "outline"} />
-            }
-          >
-            {siswa.status === "ACTIVE" ? "Nonaktifkan Siswa" : "Aktifkan Siswa"}
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {siswa.status === "ACTIVE"
-                  ? `Nonaktifkan ${siswa.name}?`
-                  : `Aktifkan ${siswa.name}?`}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {siswa.status === "ACTIVE"
-                  ? "Data dan riwayat absensi siswa tidak akan dihapus. Siswa nonaktif tidak akan bisa melakukan absensi baru."
-                  : "Siswa ini akan kembali muncul sebagai siswa aktif dan bisa melakukan absensi."}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Batal</AlertDialogCancel>
-              <form action={setStudentStatusAction.bind(null, id, nextStatus)}>
-                <AlertDialogAction type="submit">Ya, Lanjutkan</AlertDialogAction>
-              </form>
-</AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button variant={siswa.status === "ACTIVE" ? "destructive" : "outline"} />
+              }
+            >
+              {siswa.status === "ACTIVE" ? "Nonaktifkan Siswa" : "Aktifkan Siswa"}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {siswa.status === "ACTIVE"
+                    ? `Nonaktifkan ${siswa.name}?`
+                    : `Aktifkan ${siswa.name}?`}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {siswa.status === "ACTIVE"
+                    ? "Data dan riwayat absensi siswa tidak akan dihapus. Siswa nonaktif tidak akan bisa melakukan absensi baru."
+                    : "Siswa ini akan kembali muncul sebagai siswa aktif dan bisa melakukan absensi."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Batal</AlertDialogCancel>
+                <form action={setStudentStatusAction.bind(null, id, nextStatus)}>
+                  <SubmitButton pendingText="Memproses...">Ya, Lanjutkan</SubmitButton>
+                </form>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 

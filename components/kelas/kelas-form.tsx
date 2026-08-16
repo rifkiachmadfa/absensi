@@ -16,6 +16,7 @@ import {
   updateClassAction,
   type ClassFormState,
 } from "@/app/(protected)/kelas/action";
+import { Spinner } from "@/components/ui/spinner";
 
 type Option = { id: string; name: string };
 
@@ -116,7 +117,8 @@ export function KelasForm({
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
-      <Button type="submit" disabled={isPending}>
+<Button type="submit" disabled={isPending}>
+        {isPending && <Spinner />}
         {isPending ? "Menyimpan..." : mode === "edit" ? "Simpan Perubahan" : "Tambah Kelas"}
       </Button>
     </form>

@@ -8,6 +8,7 @@ import {
   createAcademicYearAction,
   type AcademicYearFormState,
 } from "@/app/(protected)/tahun-ajaran/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 const initialState: AcademicYearFormState = {};
 
@@ -31,7 +32,8 @@ export function AcademicYearForm() {
           <Label htmlFor="name">Tahun Ajaran Baru</Label>
           <Input id="name" name="name" placeholder="2026/2027" required />
         </div>
-        <Button type="submit" disabled={isPending}>
+<Button type="submit" disabled={isPending}>
+          {isPending && <Spinner />}
           {isPending ? "Menyimpan..." : "Tambah Tahun Ajaran"}
         </Button>
       </div>

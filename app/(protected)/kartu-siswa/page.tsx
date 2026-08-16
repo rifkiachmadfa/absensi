@@ -127,7 +127,7 @@ printTitle = "Kartu Siswa — Seluruh Siswa Aktif";
   return (
     <div className="space-y-6">
         <div>
-          <h1 className="text-lg font-semibold">Kartu Siswa</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Kartu Siswa</h1>
           <p className="text-sm text-muted-foreground">
             Cari satu siswa, atau cetak kartu untuk satu kelas / seluruh
             siswa aktif sekaligus.

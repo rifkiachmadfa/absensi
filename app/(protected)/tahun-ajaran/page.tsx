@@ -4,6 +4,7 @@ import { setActiveAcademicYearAction } from "./actions";
 import { AcademicYearForm } from "@/components/tahun-ajaran/academic-year-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import {
   Table,
   TableBody,
@@ -20,7 +21,6 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogDescription,
-  AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 
@@ -36,7 +36,7 @@ export default async function TahunAjaranPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">Tahun Ajaran</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Tahun Ajaran</h1>
         <p className="text-sm text-muted-foreground">
           Kelola tahun ajaran. Hanya satu tahun ajaran yang bisa aktif dalam
           satu waktu.
@@ -87,15 +87,15 @@ export default async function TahunAjaranPage({
                 <TableCell className="text-right">
                   {year.status !== "ACTIVE" && (
                     <AlertDialog>
-                        <AlertDialogTrigger
+                      <AlertDialogTrigger
                         render={
-                            <Button size="sm" variant="outline">
+                          <Button size="sm" variant="outline">
                             Jadikan Aktif
-                            </Button>
+                          </Button>
                         }
-                        >
+                      >
                         Jadikan Aktif
-                        </AlertDialogTrigger>
+                      </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>
@@ -109,9 +109,9 @@ export default async function TahunAjaranPage({
                         <AlertDialogFooter>
                           <AlertDialogCancel>Batal</AlertDialogCancel>
                           <form action={setActiveAcademicYearAction.bind(null, year.id)}>
-                            <AlertDialogAction type="submit">
+                            <SubmitButton pendingText="Mengaktifkan...">
                               Ya, Aktifkan
-                            </AlertDialogAction>
+                            </SubmitButton>
                           </form>
                         </AlertDialogFooter>
                       </AlertDialogContent>

@@ -5,6 +5,7 @@ import { LogOut, User as UserIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,7 +83,7 @@ export function UserNav({
             onClick={() => startTransition(() => logoutAction())}
             className="text-destructive focus:text-destructive"
         >
-            <LogOut className="mr-2 h-4 w-4" />
+{isPending ? <Spinner className="mr-2" /> : <LogOut className="mr-2 h-4 w-4" />}
             {isPending ? "Keluar..." : "Keluar"}
         </DropdownMenuItem>
         </DropdownMenuContent>
