@@ -65,12 +65,19 @@ export async function listStudents(filter: StudentFilterInput, page = 1) {
   };
 }
 
+// SESUDAH
 export async function getStudentById(id: string) {
   return prisma.student.findUnique({
     where: { id },
     include: {
       class: {
-        select: { id: true, name: true, status: true, homeroomTeacherId: true },
+        select: {
+          id: true,
+          name: true,
+          major: true,
+          status: true,
+          homeroomTeacherId: true,
+        },
       },
     },
   });
@@ -87,6 +94,7 @@ export async function getStudentById(id: string) {
  * namun tetap dibatasi hanya siswa berstatus ACTIVE karena kartu siswa
  * nonaktif tidak relevan untuk dicetak massal.
  */
+// SESUDAH
 export async function getStudentsForCardPrint(params: { classId?: string }) {
   return prisma.student.findMany({
     where: {
@@ -94,7 +102,7 @@ export async function getStudentsForCardPrint(params: { classId?: string }) {
       classId: params.classId || undefined,
     },
     include: {
-      class: { select: { id: true, name: true } },
+      class: { select: { id: true, name: true, major: true } },
     },
     orderBy: [{ class: { name: "asc" } }, { name: "asc" }],
   });

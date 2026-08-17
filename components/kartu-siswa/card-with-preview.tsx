@@ -1,3 +1,4 @@
+// components/kartu-siswa/card-with-preview.tsx
 "use client";
 
 import {
@@ -24,29 +25,27 @@ export function CardWithPreview({
           <button
             type="button"
             aria-label={`Lihat kartu ${card.name}`}
-            className="cursor-pointer rounded-lg text-left transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full max-w-[400px] cursor-pointer rounded-[18px] text-left transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         }
       >
         <StudentIdCard student={card} schoolName={schoolName} />
       </DialogTrigger>
 
-      <DialogContent className="max-w-fit">
+      <DialogContent className="max-w-[460px]">
         <DialogHeader>
           <DialogTitle>{card.name}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex justify-center overflow-x-auto py-6">
-          <div className="scale-150">
-            <StudentIdCard student={card} schoolName={schoolName} />
-          </div>
+        <div className="flex justify-center py-4">
+          <StudentIdCard student={card} schoolName={schoolName} />
         </div>
 
         <div className="flex justify-center pt-2">
           <DownloadPdfButton
             cards={[card]}
             schoolName={schoolName}
-            fileName={`kartu-siswa-${card.nis}.pdf`}
+            fileName={`kartu-murid-${card.nis}.pdf`}
             label="Download Kartu Ini"
           />
         </div>
