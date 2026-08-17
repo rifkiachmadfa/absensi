@@ -18,3 +18,20 @@ export async function requireRole(
 
   return user;
 }
+
+/**
+ * Versi lebih fleksibel dari requireRole: menerima fungsi cek dari
+ * lib/auth/permissions.ts, termasuk yang butuh konteks (mis. kelas).
+ * Contoh: await requirePermission((u) => canCreateStudent(u, homeroomTeacherId))
+ */
+export async function requirePermission(
+  check: (user: SessionUser) => boolean
+): Promise<SessionUser> {
+  const user = await requireAuth();
+
+  if (!check(user)) {
+    redirect("/unauthorized");
+  }
+
+  return user;
+}

@@ -21,6 +21,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { requireAuth } from "@/lib/auth/session";
+import { canCreateStudentSomewhere } from "@/lib/auth/permissions";
+
+const actor = await requireAuth();
+
 export default async function SiswaPage({
   searchParams,
 }: {
@@ -72,7 +77,9 @@ export default async function SiswaPage({
           <Button variant="outline" render={<Link href="/kartu-siswa" />}>
             Kartu Siswa
           </Button>
-          <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
+          {canCreateStudentSomewhere(actor) && (
+  <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
+)}
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guard";
+import { requireAuth } from "@/lib/auth/session";
+import { canManageClasses } from "@/lib/auth/permissions";
 import {
   getClassById,
   getAcademicYearOptions,
@@ -30,7 +31,7 @@ export default async function DetailKelasPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireRole(["SUPERADMIN", "ADMIN"]);
+  const actor = await requireAuth();
   const { id } = await params;
   const { error } = await searchParams;
 
@@ -65,12 +66,11 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
         </div>
 
 <div className="flex gap-2">
-          <Button
-            variant="outline"
-            render={<Link href={`/kartu-siswa?classId=${kelas.id}`} />}
-          >
-            Cetak Kartu Kelas
-          </Button>
+  <Button variant="outline" render={<Link href={`/kartu-siswa?classId=${kelas.id}`} />}>
+    Cetak Kartu Kelas
+  </Button>
+
+        {canManageClasses(actor) && (
 
           <AlertDialog>
             <AlertDialogTrigger
@@ -101,6 +101,7 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
 </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+          )}
         </div>
       </div>
 
@@ -109,6 +110,7 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
           {decodeURIComponent(error)}
         </div>
       )}
+{canManageClasses(actor) && (
 
       <div className="rounded-lg border p-4">
         <h2 className="mb-4 text-sm font-semibold">Edit Data Kelas</h2>
@@ -126,7 +128,7 @@ const [kelas, academicYearOptions, homeroomTeacherOptions, studentsInClass] =
           }}
         />
       </div>
-
+)}
       <div className="rounded-lg border p-4">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold">

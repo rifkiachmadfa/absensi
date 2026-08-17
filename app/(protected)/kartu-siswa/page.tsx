@@ -40,7 +40,7 @@ export default async function KartuSiswaPage({
     all?: string;
   }>;
 }) {
-  await requireRole(["SUPERADMIN", "ADMIN"]);
+  await requireRole(["SUPERADMIN", "ADMIN", "WALI_KELAS"]);
   const { q, studentId, classId, all } = await searchParams;
 
   const [classOptions, schoolName] = await Promise.all([

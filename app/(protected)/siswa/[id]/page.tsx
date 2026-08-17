@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guard";
+import { requireAuth } from "@/lib/auth/session";
+import { canSetStudentStatus } from "@/lib/auth/permissions";
 import { getStudentById, getClassOptions } from "@/lib/services/siswa-service";
 import { SiswaForm } from "@/components/siswa/siswa-form";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { setStudentStatusAction } from "@/app/(protected)/siswa/action";
 
+
+
 export default async function DetailSiswaPage({
   params,
   searchParams,
@@ -25,7 +28,7 @@ export default async function DetailSiswaPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireRole(["SUPERADMIN", "ADMIN"]);
+  const actor = await requireAuth();  
   const { id } = await params;
   const { error } = await searchParams;
 
@@ -63,6 +66,7 @@ export default async function DetailSiswaPage({
           >
             Lihat / Cetak Kartu
           </Button>
+          {canSetStudentStatus(actor, siswa.class.homeroomTeacherId) && (
 
           <AlertDialog>
             <AlertDialogTrigger
@@ -93,6 +97,7 @@ export default async function DetailSiswaPage({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          )}
         </div>
       </div>
 

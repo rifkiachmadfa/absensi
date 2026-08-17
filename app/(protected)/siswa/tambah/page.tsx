@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guard";
-import { getClassOptions } from "@/lib/services/siswa-service";
+import { requireAuth } from "@/lib/auth/session";
+import { canCreateStudentSomewhere } from "@/lib/auth/permissions";
+import { getClassOptionsForCreate } from "@/lib/services/siswa-service";
+import { redirect } from "next/navigation";
 import { SiswaForm } from "@/components/siswa/siswa-form";
 
 export default async function TambahSiswaPage({
@@ -8,9 +10,11 @@ export default async function TambahSiswaPage({
 }: {
   searchParams: Promise<{ classId?: string }>;
 }) {
-  await requireRole(["SUPERADMIN", "ADMIN"]);
+
+  const actor = await requireAuth();
+if (!canCreateStudentSomewhere(actor)) redirect("/unauthorized");
   const { classId } = await searchParams;
-  const classOptions = await getClassOptions();
+  const classOptions = await getClassOptionsForCreate(actor) 
 
   return (
     <div className="space-y-6">

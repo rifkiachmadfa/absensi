@@ -23,6 +23,12 @@ export type NavItem = {
 
 // Struktur menu sesuai UI_RULES §5 (Dashboard, Absensi, Siswa, Kelas,
 // Laporan, Kartu Siswa, Log Aktivitas, Pengaturan).
+//
+// PENTING: `roles` di sini HANYA mengatur tampil/tidaknya item menu.
+// Ini bukan sumber kebenaran otorisasi — setiap page/action tetap
+// wajib punya guard sendiri (requireAuth/requireRole/fungsi canXxx di
+// lib/auth/permissions.ts), supaya akses lewat URL langsung tetap
+// tertolak sesuai role meskipun menunya tidak tampil.
 export const NAV_ITEMS: NavItem[] = [
   {
     href: "/",
@@ -40,13 +46,17 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/siswa",
     label: "Siswa",
     icon: Users,
-    roles: ["SUPERADMIN", "ADMIN"],
+    // GURU: lihat & ubah identitas siswa (tidak bisa tambah/nonaktifkan).
+    // WALI_KELAS: + tambah/nonaktifkan siswa khusus di kelas ampuannya.
+    roles: ["SUPERADMIN", "ADMIN", "GURU", "WALI_KELAS"],
   },
   {
     href: "/kelas",
     label: "Kelas",
     icon: GraduationCap,
-    roles: ["SUPERADMIN", "ADMIN"],
+    // Semua role bisa lihat daftar & statistik kelas; kelola kelas
+    // (tambah/edit/nonaktifkan) dibatasi di page lewat canManageClasses.
+    roles: ["SUPERADMIN", "ADMIN", "GURU", "WALI_KELAS"],
   },
   {
     href: "/guru",
@@ -54,7 +64,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: UserCog,
     roles: ["SUPERADMIN", "ADMIN"],
   },
-{
+  {
     href: "/laporan",
     label: "Laporan",
     icon: FileText,
@@ -64,7 +74,7 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/kartu-siswa",
     label: "Kartu Siswa",
     icon: IdCard,
-    roles: ["SUPERADMIN", "ADMIN"],
+    roles: ["SUPERADMIN", "ADMIN", "WALI_KELAS"],
   },
   {
     href: "/log-aktivitas",
@@ -72,7 +82,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: History,
     roles: ["SUPERADMIN"],
   },
-{
+  {
     href: "/pengaturan",
     label: "Pengaturan",
     icon: Settings,

@@ -70,7 +70,7 @@ export async function getStudentById(id: string) {
     where: { id },
     include: {
       class: {
-        select: { id: true, name: true, status: true },
+        select: { id: true, name: true, status: true, homeroomTeacherId: true },
       },
     },
   });
@@ -102,6 +102,35 @@ export async function getStudentsForCardPrint(params: { classId?: string }) {
 
 export async function getClassOptions() {
   return prisma.class.findMany({
+    select: { id: true, name: true, status: true },
+    orderBy: [{ status: "asc" }, { name: "asc" }],
+  });
+}
+
+export async function getClassHomeroomTeacherId(classId: string) {
+  const kelas = await prisma.class.findUnique({
+    where: { id: classId },
+    select: { homeroomTeacherId: true },
+  });
+  return kelas?.homeroomTeacherId ?? null;
+}
+
+export async function getStudentClassHomeroomTeacherId(studentId: string) {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { class: { select: { homeroomTeacherId: true } } },
+  });
+  return student?.class.homeroomTeacherId ?? null;
+}
+
+/** Daftar kelas yang boleh dipilih actor untuk MENAMBAH siswa. */
+export async function getClassOptionsForCreate(actor: SessionUser) {
+  if (actor.role === "SUPERADMIN" || actor.role === "ADMIN") {
+    return getClassOptions();
+  }
+  // WALI_KELAS hanya boleh menambah siswa ke kelas yang ia ampu.
+  return prisma.class.findMany({
+    where: { homeroomTeacherId: actor.id },
     select: { id: true, name: true, status: true },
     orderBy: [{ status: "asc" }, { name: "asc" }],
   });

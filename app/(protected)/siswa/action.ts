@@ -2,12 +2,15 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireRole } from "@/lib/auth/guard";
+import { requireAuth } from "@/lib/auth/session";
+import { canCreateStudent, canSetStudentStatus } from "@/lib/auth/permissions";
 import { studentFormSchema } from "@/lib/validations/siswa";
 import {
   createStudent,
   updateStudent,
   setStudentStatus,
+  getClassHomeroomTeacherId,
+  getStudentClassHomeroomTeacherId,
   StudentServiceError,
 } from "@/lib/services/siswa-service";
 
@@ -29,11 +32,18 @@ export async function createStudentAction(
   _prevState: StudentFormState,
   formData: FormData
 ): Promise<StudentFormState> {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN"]);
+  const actor = await requireAuth();
 
   const parsed = parseStudentForm(formData);
   if (!parsed.success) {
     return { fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const homeroomTeacherId = await getClassHomeroomTeacherId(parsed.data.classId);
+  if (!canCreateStudent(actor, homeroomTeacherId)) {
+    return {
+      error: "Anda tidak memiliki izin untuk menambahkan siswa ke kelas ini.",
+    };
   }
 
   let created;
@@ -56,7 +66,9 @@ export async function updateStudentAction(
   _prevState: StudentFormState,
   formData: FormData
 ): Promise<StudentFormState> {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN"]);
+  // Ubah identitas siswa (nama/NIS/NISN/kelas) boleh dilakukan semua role login,
+  // sesuai aturan: GURU & WALI_KELAS boleh merubah identitas siswa.
+  const actor = await requireAuth();
 
   const parsed = parseStudentForm(formData);
   if (!parsed.success) {
@@ -82,7 +94,16 @@ export async function setStudentStatusAction(
   id: string,
   status: "ACTIVE" | "INACTIVE"
 ) {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN"]);
+  const actor = await requireAuth();
+
+  const homeroomTeacherId = await getStudentClassHomeroomTeacherId(id);
+  if (!canSetStudentStatus(actor, homeroomTeacherId)) {
+    redirect(
+      `/siswa/${id}?error=${encodeURIComponent(
+        "Anda tidak memiliki izin untuk mengubah status siswa ini."
+      )}`
+    );
+  }
 
   try {
     await setStudentStatus(id, status, actor);

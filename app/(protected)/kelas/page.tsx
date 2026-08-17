@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guard";
 import { listClasses, getAcademicYearOptions } from "@/lib/services/kelas-service";
 import { classFilterSchema } from "@/lib/validations/kelas";
 import { Badge } from "@/components/ui/badge";
@@ -20,13 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requireAuth } from "@/lib/auth/session";
+import { canManageClasses } from "@/lib/auth/permissions";
 
 export default async function KelasPage({
   searchParams,
 }: {
   searchParams: Promise<{ search?: string; academicYearId?: string; status?: string }>;
 }) {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN"]);
+  const actor = await requireAuth();
   const rawParams = await searchParams;
 
   const filter = classFilterSchema.parse({
@@ -50,19 +51,16 @@ export default async function KelasPage({
           <h1 className="text-2xl font-semibold text-foreground">Kelas</h1>
           <p className="text-sm text-muted-foreground">Kelola data kelas per tahun ajaran.</p>
         </div>
-        <div className="flex gap-2">
-          {actor.role === "SUPERADMIN" && (
-            <Button
-            variant="outline"
-            render={<Link href="/tahun-ajaran" />}
-            >
-            Kelola Tahun Ajaran
-            </Button>
-          )}
-            <Button render={<Link href="/kelas/tambah" />}>
-            + Tambah Kelas
-            </Button>
-        </div>
+<div className="flex gap-2">
+  {actor.role === "SUPERADMIN" && (
+    <Button variant="outline" render={<Link href="/tahun-ajaran" />}>
+      Kelola Tahun Ajaran
+    </Button>
+  )}
+  {canManageClasses(actor) && (
+    <Button render={<Link href="/kelas/tambah" />}>+ Tambah Kelas</Button>
+  )}
+</div>
       </div>
 
       {academicYearOptions.length === 0 && (
