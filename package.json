@@ -7,7 +7,8 @@
     "@prisma/engines@7.9.1": true,
     "esbuild@0.28.2": true,
     "prisma@7.9.1": true,
-    "unrs-resolver@1.12.2": true
+    "unrs-resolver@1.12.2": true,
+    "core-js@3.50.0": true
   },
   "scripts": {
     "dev": "next dev",
@@ -23,6 +24,7 @@
     "@supabase/supabase-js": "^2.112.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.31.0",

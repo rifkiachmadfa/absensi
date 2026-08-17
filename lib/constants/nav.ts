@@ -46,12 +46,11 @@ export const NAV_ITEMS: NavItem[] = [
     icon: GraduationCap,
     roles: ["SUPERADMIN", "ADMIN"],
   },
-  {
+{
     href: "/laporan",
     label: "Laporan",
     icon: FileText,
     roles: ["SUPERADMIN", "ADMIN", "WALI_KELAS"],
-    comingSoon: true, // dibangun di Phase 10
   },
   {
     href: "/kartu-siswa",
