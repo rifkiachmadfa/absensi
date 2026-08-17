@@ -1,7 +1,8 @@
 // lib/xlsx/report-workbook.ts
 import "server-only";
 import ExcelJS from "exceljs";
-import type { ReportPayload } from "@/lib/services/report-service";
+import type { ReportPayload, StudentReportDetail } from "@/lib/services/report-service";
+import { STATUS_LABEL } from "@/lib/constants/attendance";
 
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: "pattern",
@@ -202,6 +203,90 @@ export function buildReportWorkbook(report: ReportPayload, schoolName: string): 
     ]);
     styleDataRow(row);
     row.getCell(12).numFmt = "0%";
+  }
+
+  return workbook;
+}
+
+// ============================================================
+// Workbook laporan per-siswa (dipakai oleh /laporan/siswa/[id] dan
+// endpoint /api/laporan/siswa/[id]/export). Satu sheet ringkasan + satu
+// sheet log harian, mengikuti gaya visual yang sama dengan buildReportWorkbook.
+// ============================================================
+
+export function buildStudentReportWorkbook(
+  detail: StudentReportDetail,
+  schoolName: string
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = schoolName;
+  workbook.created = new Date();
+
+  const periodSubtitle =
+    detail.period.mode === "daily"
+      ? `Laporan Harian — ${detail.period.label}`
+      : `Laporan Bulanan — ${detail.period.label} (${detail.period.schoolDays} hari sekolah)`;
+  const studentSubtitle = `${detail.student.name} — NIS ${detail.student.nis} — NISN ${detail.student.nisn} — ${detail.student.className}`;
+
+  // ============================================================
+  // Sheet 1: Ringkasan
+  // ============================================================
+  const ringkasan = workbook.addWorksheet("Ringkasan", {
+    views: [{ state: "frozen", ySplit: 5 }],
+  });
+  ringkasan.columns = [{ width: 28 }, { width: 18 }];
+  addTitleBlock(ringkasan, schoolName, periodSubtitle, 2);
+
+  ringkasan.mergeCells(4, 1, 4, 2);
+  const studentCell = ringkasan.getCell(4, 1);
+  studentCell.value = studentSubtitle;
+  studentCell.font = { size: 10, color: { argb: "FF475569" } };
+  ringkasan.addRow([]);
+
+  styleHeaderRow(ringkasan.addRow(["Indikator", "Jumlah"]));
+
+  const summaryRows: [string, number | string][] = [
+    ["Hadir", detail.summary.hadir],
+    ["Terlambat", detail.summary.terlambat],
+    ["Sakit", detail.summary.sakit],
+    ["Izin", detail.summary.izin],
+    ["Dispensasi", detail.summary.dispensasi],
+    ["Alpha", detail.summary.alpha],
+    ["Belum Diisi", detail.summary.belumAbsen],
+    ["Total Hari Sekolah", detail.summary.totalSchoolDays],
+    ["Persentase Kehadiran", `${detail.summary.persentaseKehadiran}%`],
+  ];
+  for (const [label, value] of summaryRows) {
+    styleDataRow(ringkasan.addRow([label, value]));
+  }
+
+  // ============================================================
+  // Sheet 2: Log Harian
+  // ============================================================
+  const logHeaders = ["Tanggal", "Hari", "Status", "Jam Masuk"];
+  const log = workbook.addWorksheet("Log Harian", {
+    views: [{ state: "frozen", ySplit: 4 }],
+  });
+  log.columns = [{ width: 16 }, { width: 12 }, { width: 14 }, { width: 14 }];
+  addTitleBlock(log, schoolName, `${periodSubtitle} — ${studentSubtitle}`, logHeaders.length);
+  styleHeaderRow(log.addRow(logHeaders));
+  log.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: logHeaders.length } };
+
+  for (const entry of detail.log) {
+    const row = log.addRow([
+      entry.date,
+      entry.weekday,
+      STATUS_LABEL[entry.status] ?? entry.status,
+      entry.checkInAt
+        ? new Intl.DateTimeFormat("id-ID", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            timeZone: "Asia/Jakarta",
+          }).format(new Date(entry.checkInAt))
+        : "-",
+    ]);
+    styleDataRow(row);
   }
 
   return workbook;

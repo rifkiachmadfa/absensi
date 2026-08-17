@@ -6,6 +6,8 @@ import { getStudentAttendanceDetail } from "@/lib/services/report-service";
 import { getTodayDateOnly } from "@/lib/services/attendance-service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -15,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
+import { StudentExportButton } from "@/components/laporan/student-export-button";
 
 function toISODateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -66,17 +69,88 @@ export default async function LaporanSiswaDetailPage({
 
   const backHref = `/laporan?mode=${mode}${mode === "daily" ? `&date=${date}` : `&month=${month}`}`;
 
+  // Dipakai oleh tombol toggle mode (Harian/Bulanan) agar date/month yang
+  // sedang aktif tetap terbawa saat berpindah mode.
+  const modeQuery = (nextMode: "daily" | "monthly") => {
+    const params = new URLSearchParams();
+    params.set("mode", nextMode);
+    if (nextMode === "daily") params.set("date", date);
+    else params.set("month", month);
+    return `/laporan/siswa/${id}?${params.toString()}`;
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <Button variant="ghost" size="sm" render={<Link href={backHref} />} className="mb-2 -ml-2">
-          ← Kembali ke Laporan
-        </Button>
-        <h1 className="text-2xl font-semibold text-foreground">{detail.student.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          NIS {detail.student.nis} • NISN {detail.student.nisn} • {detail.student.className}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">{detail.period.label}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Button variant="ghost" size="sm" render={<Link href={backHref} />} className="mb-2 -ml-2">
+            ← Kembali ke Laporan
+          </Button>
+          <h1 className="text-2xl font-semibold text-foreground">{detail.student.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            NIS {detail.student.nis} • NISN {detail.student.nisn} • {detail.student.className}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{detail.period.label}</p>
+        </div>
+        <StudentExportButton studentId={id} mode={mode} date={date} month={month} />
+      </div>
+
+      {/* Filter: mode Harian/Bulanan + pemilih tanggal/bulan, mengikuti pola
+          filter di halaman /laporan agar konsisten. */}
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
+        <div className="space-y-1">
+          <Label>Mode</Label>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "daily" ? "default" : "outline"}
+              render={<Link href={modeQuery("daily")} />}
+            >
+              Harian
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "monthly" ? "default" : "outline"}
+              render={<Link href={modeQuery("monthly")} />}
+            >
+              Bulanan
+            </Button>
+          </div>
+        </div>
+
+        <form className="flex flex-wrap items-end gap-3" method="get">
+          <input type="hidden" name="mode" value={mode} />
+
+          {mode === "daily" ? (
+            <div className="space-y-1">
+              <Label htmlFor="date">Tanggal</Label>
+              <Input
+                id="date"
+                type="date"
+                name="date"
+                defaultValue={date}
+                max={toISODateOnly(today)}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor="month">Bulan</Label>
+              <Input
+                id="month"
+                type="month"
+                name="month"
+                defaultValue={month}
+                max={toISODateOnly(today).slice(0, 7)}
+              />
+            </div>
+          )}
+
+          <Button type="submit" variant="outline">
+            Terapkan
+          </Button>
+        </form>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

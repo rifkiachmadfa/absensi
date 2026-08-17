@@ -63,7 +63,6 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Log Aktivitas",
     icon: History,
     roles: ["SUPERADMIN"],
-    comingSoon: true, // dibangun di Phase 12
   },
   {
     href: "/pengaturan",
