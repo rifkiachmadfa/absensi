@@ -50,12 +50,13 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Modern School — UI_RULES §9 (Page Title 24–30px / 600–700) & §3 (brand accent) */}
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">
+        <div className="space-y-1">
+          <p className="text-[13px] font-medium text-[#48616A]">
             {formatIndonesianDate(today)}
           </p>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-[26px] font-bold tracking-tight text-[#17313A]">
             Selamat datang, {user.name.split(" ")[0]}
           </h1>
         </div>
@@ -63,6 +64,7 @@ export default async function DashboardPage() {
 
       <QuickActions role={user.role} />
 
+      {/* Statistic cards — UI_RULES §15, spacing kelipatan 4px */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           label="Total Siswa"

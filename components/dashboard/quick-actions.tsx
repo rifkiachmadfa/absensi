@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { ScanLine, Users, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { UserRole } from "@/app/generated/prisma/enums";
 
 type Action = {
@@ -42,10 +43,16 @@ export function QuickActions({ role }: { role: UserRole }) {
       {items.map((action) => (
         <Button
           key={action.href}
-          variant={action.primary ? "default" : "outline"}
+          size="lg"
           render={<Link href={action.href} />}
+          className={cn(
+            "min-h-11 rounded-[10px] px-4 font-medium",
+            action.primary
+              ? "bg-[#22949E] text-white hover:bg-[#1C7F88]"
+              : "border border-[#DCE7E9] bg-white text-[#17313A] hover:bg-[#F1F5F5]"
+          )}
         >
-          <action.icon data-icon="inline-start" />
+          <action.icon data-icon="inline-start" className="size-4" />
           {action.label}
         </Button>
       ))}

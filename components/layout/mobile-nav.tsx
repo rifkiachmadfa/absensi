@@ -36,7 +36,7 @@ export function MobileNav({ role }: { role: UserRole }) {
           <SheetTitle>Menu Navigasi</SheetTitle>
         </SheetHeader>
         <div className="overflow-y-auto">
-          <NavList role={role} onNavigate={() => setOpen(false)} />
+          <NavList role={role} variant="sheet" onNavigate={() => setOpen(false)} />
         </div>
       </SheetContent>
     </Sheet>

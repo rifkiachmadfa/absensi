@@ -39,7 +39,7 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
 
-    /* Modern School — status semantic tokens (UI_RULES §3–4) */
+    /* Modern School — status semantic tokens (UI_RULES §3–5) */
     --color-success: var(--success);
     --color-success-foreground: var(--success-foreground);
     --color-success-bg: var(--success-bg);
@@ -53,6 +53,14 @@
     --color-info-foreground: var(--info-foreground);
     --color-info-bg: var(--info-bg);
 
+    /* Modern School — brand tokens (UI_RULES §36) */
+    --color-brand-deep: var(--brand-deep);
+    --color-brand-primary: var(--brand-primary);
+    --color-brand-accent: var(--brand-accent);
+    --color-surface-muted: var(--surface-muted);
+    --color-surface-teal-soft: var(--surface-teal-soft);
+    --color-surface-yellow-soft: var(--surface-yellow-soft);
+
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -65,43 +73,51 @@
 :root {
     --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-    /* ===== Modern School Design Tokens (UI_RULES §3) ===== */
-    --background: #F8FAFC;
-    --foreground: #0F172A;
+    /* ===== Modern School Design Tokens (UI_RULES §3–4) ===== */
+    /* Background & Surface */
+    --background: #F8FAFA;
+    --foreground: #17313A;
     --card: #FFFFFF;
-    --card-foreground: #0F172A;
+    --card-foreground: #17313A;
     --popover: #FFFFFF;
-    --popover-foreground: #0F172A;
-    --primary: #2563EB;
+    --popover-foreground: #17313A;
+
+    /* Primary = Yadika Teal (interactive/CTA/link/focus) */
+    --primary: #22949E;
     --primary-foreground: #FFFFFF;
-    --secondary: #F1F5F9;
-    --secondary-foreground: #0F172A;
-    --muted: #F1F5F9;
-    --muted-foreground: #64748B;
-    --accent: #EFF6FF;
-    --accent-foreground: #1D4ED8;
+
+    --secondary: #F1F5F5;
+    --secondary-foreground: #17313A;
+    --muted: #F1F5F5;
+    --muted-foreground: #48616A;
+
+    /* Accent = Surface Teal Soft, dipakai untuk highlight ringan/info */
+    --accent: #EAF7F8;
+    --accent-foreground: #17586F;
+
     --destructive: #DC2626;
-    --border: #E2E8F0;
-    --input: #E2E8F0;
-    --ring: #2563EB;
+    --border: #DCE7E9;
+    --input: #DCE7E9;
+    --ring: #22949E;
     --radius: 0.625rem;
 
     --chart-1: #16A34A;
     --chart-2: #D97706;
     --chart-3: #DC2626;
-    --chart-4: #2563EB;
-    --chart-5: #64748B;
+    --chart-4: #22949E;
+    --chart-5: #71858C;
 
-    --sidebar: #FFFFFF;
-    --sidebar-foreground: #0F172A;
-    --sidebar-primary: #2563EB;
-    --sidebar-primary-foreground: #FFFFFF;
-    --sidebar-accent: #EFF6FF;
-    --sidebar-accent-foreground: #1D4ED8;
-    --sidebar-border: #E2E8F0;
-    --sidebar-ring: #2563EB;
+    /* Sidebar — UI_RULES §22: boleh Deep Teal, jangan seluruh app dark */
+    --sidebar: #17586F;
+    --sidebar-foreground: #FFFFFF;
+    --sidebar-primary: #FFCC31;
+    --sidebar-primary-foreground: #17313A;
+    --sidebar-accent: rgba(255, 255, 255, 0.12);
+    --sidebar-accent-foreground: #FFFFFF;
+    --sidebar-border: rgba(255, 255, 255, 0.12);
+    --sidebar-ring: #FFCC31;
 
-    /* Status colors — UI_RULES §3 & §4 (blue=action, green=hadir, amber=terlambat, red=alpha) */
+    /* Status colors — UI_RULES §5 (tetap beda dari brand agar mudah dibaca) */
     --success: #16A34A;
     --success-foreground: #FFFFFF;
     --success-bg: #F0FDF4;
@@ -111,45 +127,57 @@
     --danger: #DC2626;
     --danger-foreground: #FFFFFF;
     --danger-bg: #FEF2F2;
-    --info: #2563EB;
+    --info: #22949E;
     --info-foreground: #FFFFFF;
-    --info-bg: #EFF6FF;
+    --info-bg: #EAF7F8;
+
+    /* Brand tokens — UI_RULES §36 */
+    --brand-deep: #17586F;
+    --brand-primary: #22949E;
+    --brand-accent: #FFCC31;
+    --surface-muted: #F1F5F5;
+    --surface-teal-soft: #EAF7F8;
+    --surface-yellow-soft: #FFF8D9;
 }
 
 .dark {
-    --background: #0B1220;
-    --foreground: #F1F5F9;
-    --card: #111827;
-    --card-foreground: #F1F5F9;
-    --popover: #111827;
-    --popover-foreground: #F1F5F9;
-    --primary: #3B82F6;
-    --primary-foreground: #FFFFFF;
-    --secondary: #1E293B;
-    --secondary-foreground: #F1F5F9;
-    --muted: #1E293B;
-    --muted-foreground: #94A3B8;
-    --accent: #172554;
-    --accent-foreground: #93C5FD;
+    /* Dark mode belum didefinisikan eksplisit di UI_RULES (Modern School
+       dirancang sebagai light, professional academic look). Palet di bawah
+       menjaga identitas brand teal + yellow secara konsisten pada permukaan
+       gelap, tanpa membuat seluruh aplikasi terasa "dark UI futuristic". */
+    --background: #0C1B20;
+    --foreground: #EAF3F4;
+    --card: #10262C;
+    --card-foreground: #EAF3F4;
+    --popover: #10262C;
+    --popover-foreground: #EAF3F4;
+    --primary: #2FB0BB;
+    --primary-foreground: #06171A;
+    --secondary: #16323A;
+    --secondary-foreground: #EAF3F4;
+    --muted: #16323A;
+    --muted-foreground: #8FADB3;
+    --accent: #123B42;
+    --accent-foreground: #7FD3DB;
     --destructive: #EF4444;
     --border: rgba(255, 255, 255, 0.1);
     --input: rgba(255, 255, 255, 0.15);
-    --ring: #3B82F6;
+    --ring: #2FB0BB;
 
     --chart-1: #22C55E;
     --chart-2: #F59E0B;
     --chart-3: #EF4444;
-    --chart-4: #3B82F6;
-    --chart-5: #94A3B8;
+    --chart-4: #2FB0BB;
+    --chart-5: #8FADB3;
 
-    --sidebar: #111827;
-    --sidebar-foreground: #F1F5F9;
-    --sidebar-primary: #3B82F6;
-    --sidebar-primary-foreground: #FFFFFF;
-    --sidebar-accent: #172554;
-    --sidebar-accent-foreground: #93C5FD;
+    --sidebar: #0F2429;
+    --sidebar-foreground: #EAF3F4;
+    --sidebar-primary: #FFCC31;
+    --sidebar-primary-foreground: #17313A;
+    --sidebar-accent: rgba(255, 255, 255, 0.08);
+    --sidebar-accent-foreground: #FFFFFF;
     --sidebar-border: rgba(255, 255, 255, 0.1);
-    --sidebar-ring: #3B82F6;
+    --sidebar-ring: #FFCC31;
 
     --success: #22C55E;
     --success-foreground: #FFFFFF;
@@ -160,9 +188,16 @@
     --danger: #EF4444;
     --danger-foreground: #FFFFFF;
     --danger-bg: #3a0a0a;
-    --info: #3B82F6;
-    --info-foreground: #FFFFFF;
-    --info-bg: #0c1f3d;
+    --info: #2FB0BB;
+    --info-foreground: #06171A;
+    --info-bg: #123B42;
+
+    --brand-deep: #0F2429;
+    --brand-primary: #2FB0BB;
+    --brand-accent: #FFCC31;
+    --surface-muted: #16323A;
+    --surface-teal-soft: #123B42;
+    --surface-yellow-soft: #2B2412;
 }
 
 @layer base {
