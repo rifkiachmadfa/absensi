@@ -9,4 +9,4 @@
  */
 export const SCHOOL_LOGO_URL: string =
   process.env.NEXT_PUBLIC_SCHOOL_LOGO_URL ??
-  "https://res.cloudinary.com/demo/image/upload/w_200,h_200,c_fill,r_max,q_auto,f_auto/sample.jpg";
+  "https://res.cloudinary.com/dzjydhoc7/image/upload/v1786964370/Logo-yadika_pvcmub.png";
