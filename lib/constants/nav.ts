@@ -1,8 +1,10 @@
+// lib/constants/nav.ts
 import type { LucideIcon } from "lucide-react"
 import {
   LayoutDashboard,
   ScanLine,
   Users,
+  UserCog,
   GraduationCap,
   FileText,
   IdCard,
@@ -44,6 +46,12 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/kelas",
     label: "Kelas",
     icon: GraduationCap,
+    roles: ["SUPERADMIN", "ADMIN"],
+  },
+  {
+    href: "/guru",
+    label: "Guru",
+    icon: UserCog,
     roles: ["SUPERADMIN", "ADMIN"],
   },
 {
