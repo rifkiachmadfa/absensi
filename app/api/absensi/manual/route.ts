@@ -1,3 +1,4 @@
+// app/api/absensi/manual/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
@@ -19,20 +20,21 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await AttendanceService.checkIn({
+    // Hanya identifikasi siswa hasil pencarian manual -- BELUM menyimpan absensi.
+    // Status kehadiran dipilih manual oleh petugas lewat POST /api/absensi/confirm.
+    const result = await AttendanceService.identify({
       identifier: parsed.data.studentId,
       method: AttendanceMethod.MANUAL,
-      recordedById: user.id,
     });
 
     const statusCode =
-      result.type === "SUCCESS" ? 201 :
+      result.type === "SUCCESS" ? 200 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
       result.type === "STUDENT_INACTIVE" ? 409 : 200;
 
     return NextResponse.json(result, { status: statusCode });
   } catch (err) {
-    console.error("Manual attendance error:", err);
+    console.error("Identify (manual) attendance error:", err);
     return NextResponse.json({ message: "Terjadi kesalahan pada server." }, { status: 500 });
   }
 }

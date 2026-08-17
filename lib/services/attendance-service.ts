@@ -1,3 +1,4 @@
+// lib/services/attendance-service.ts
 import { prisma } from "@/lib/prisma";
 import {
   Prisma,
@@ -12,8 +13,20 @@ import {
 // Types
 // ============================================================
 
+// Hasil dari AttendanceService.confirmAttendance (Phase 8): status SUDAH
+// ditentukan manual oleh guru/petugas yang scan, bukan otomatis oleh sistem.
 export type CheckInResult =
   | { type: "SUCCESS"; student: StudentSummary; time: string; status: AttendanceStatus }
+  | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
+  | { type: "STUDENT_NOT_FOUND" }
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+
+// Hasil dari AttendanceService.identify (Phase 7): HANYA mengidentifikasi siswa
+// dari QR/pencarian manual, TIDAK membuat record absensi apapun.
+// `suggestedStatus` adalah SARAN berdasarkan AttendanceSchedule/SchoolSetting,
+// keputusan akhir tetap ada di tangan guru/petugas lewat confirmAttendance.
+export type IdentifyResult =
+  | { type: "SUCCESS"; student: StudentSummary; suggestedStatus: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "STUDENT_NOT_FOUND" }
   | { type: "STUDENT_INACTIVE"; student: StudentSummary };
@@ -64,6 +77,8 @@ type StudentSummary = {
   nisn: string;
   className: string;
 };
+// (id disertakan agar hasil identify() bisa langsung dipakai sebagai
+// studentId saat memanggil confirmAttendance())
 
 // ============================================================
 // Internal helpers
@@ -122,11 +137,20 @@ function toSummary(student: {
 // ============================================================
 // AttendanceService
 // Satu-satunya pintu masuk logic absensi. Dipakai oleh:
-// - QR Scan (Phase 7)
-// - Input manual (Phase 7)
-// - Perubahan status oleh admin/wali kelas (Phase 8)
+// - QR Scan (Phase 7)      -> identify()          (identifikasi saja)
+// - Input manual (Phase 7) -> identify()          (identifikasi saja)
+// - Konfirmasi kehadiran   -> confirmAttendance()  (Phase 8, status DIPILIH
+//   MANUAL oleh guru/petugas yang scan/mencari siswa -- BUKAN otomatis oleh
+//   sistem, karena jam masuk sekolah bisa berbeda-beda setiap hari)
+// - Perubahan status oleh admin/wali kelas (Phase 8) -> setManualStatus()
+//   (koreksi status yang SUDAH tercatat, dari tabel /absensi)
 // - Rekap harian, statistik per kelas & aktivitas terbaru untuk
 //   dashboard (Phase 9) dan laporan (Phase 10)
+//
+// Flow scan/manual sekarang 2 langkah (bukan auto-create langsung):
+//   1. identify(identifier, method)        -> kenali siswa, TIDAK menyimpan apa pun
+//   2. confirmAttendance(studentId, status) -> baru menyimpan, status pilihan guru
+//
 // Jangan buat logic absensi terpisah di luar service ini.
 // ============================================================
 
@@ -189,16 +213,20 @@ export class AttendanceService {
     return rows;
   }
   /**
-   * Absen masuk via QR Scan atau input manual.
-   * Waktu SELALU diambil dari server, tidak pernah dari client.
-   * Status ditentukan otomatis berdasarkan AttendanceSchedule / SchoolSetting.
+   * Langkah 1: identifikasi siswa dari QR Scan atau input manual.
+   * TIDAK menyimpan record absensi apapun -- hanya mengenali siswa dan
+   * memberi tahu UI apakah siswa tsb sudah absen hari ini.
+   *
+   * `suggestedStatus` dihitung dari AttendanceSchedule/SchoolSetting sebagai
+   * SARAN saja (mis. highlight tombol "Hadir" di UI). Keputusan status akhir
+   * TETAP di tangan guru/petugas lewat confirmAttendance, karena jam masuk
+   * sekolah bisa berbeda-beda setiap hari (Section 11).
    */
-  static async checkIn(params: {
+  static async identify(params: {
     identifier: string; // qrToken (QR) atau studentId (MANUAL)
     method: AttendanceMethod;
-    recordedById: string;
-  }): Promise<CheckInResult> {
-    const { identifier, method, recordedById } = params;
+  }): Promise<IdentifyResult> {
+    const { identifier, method } = params;
 
     const student = await prisma.student.findFirst({
       where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
@@ -211,8 +239,52 @@ export class AttendanceService {
     }
 
     const date = getTodayDateOnly();
-    const { serverTime, dayOfWeek, hhmm } = getJakartaNow();
-    const status = await resolveStatus(dayOfWeek, hhmm);
+    const existing = await prisma.attendance.findUnique({
+      where: { studentId_date: { studentId: student.id, date } },
+    });
+
+    if (existing) {
+      return {
+        type: "ALREADY_CHECKED_IN",
+        student: toSummary(student),
+        time: existing.checkInAt.toISOString(),
+        status: existing.status,
+      };
+    }
+
+    const { dayOfWeek, hhmm } = getJakartaNow();
+    const suggestedStatus = await resolveStatus(dayOfWeek, hhmm);
+
+    return { type: "SUCCESS", student: toSummary(student), suggestedStatus };
+  }
+
+  /**
+   * Langkah 2: konfirmasi kehadiran siswa yang sudah diidentifikasi.
+   * Status (HADIR/TERLAMBAT/SAKIT/IZIN/DISPENSASI/ALPHA) DIPILIH MANUAL oleh
+   * guru/petugas yang melakukan scan/pencarian -- sistem tidak lagi
+   * menentukan status secara otomatis di sini.
+   * Waktu SELALU diambil dari server, tidak pernah dari client.
+   */
+  static async confirmAttendance(params: {
+    studentId: string;
+    status: AttendanceStatus;
+    method: AttendanceMethod;
+    recordedById: string;
+  }): Promise<CheckInResult> {
+    const { studentId, status, method, recordedById } = params;
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: { class: true },
+    });
+
+    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (student.status !== StudentStatus.ACTIVE) {
+      return { type: "STUDENT_INACTIVE", student: toSummary(student) };
+    }
+
+    const date = getTodayDateOnly();
+    const { serverTime } = getJakartaNow();
 
     try {
       const attendance = await prisma.$transaction(async (tx) => {
@@ -236,7 +308,7 @@ export class AttendanceService {
                 : AuditAction.ATTENDANCE_MANUAL,
             entity: "Attendance",
             entityId: created.id,
-            description: `Absen ${student.name} (${student.class.name}) - ${status}`,
+            description: `Absen ${student.name} (${student.class.name}) - ${status} (dipilih manual oleh petugas)`,
           },
         });
 
@@ -252,7 +324,8 @@ export class AttendanceService {
     } catch (err) {
       // Unique constraint (studentId + date) -> sudah absen hari ini.
       // Ditangkap di sini untuk melindungi dari race condition saat burst request
-      // (banyak siswa scan bersamaan saat jam masuk sekolah).
+      // (banyak siswa scan bersamaan saat jam masuk sekolah), atau saat dua
+      // guru mengonfirmasi siswa yang sama nyaris bersamaan.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         const existing = await prisma.attendance.findUnique({
           where: { studentId_date: { studentId: student.id, date } },
