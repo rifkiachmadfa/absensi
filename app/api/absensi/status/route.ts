@@ -10,11 +10,8 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-  // GURU tidak boleh mengubah status (Section 4.3)
-  if (!["ADMIN", "SUPERADMIN", "WALI_KELAS"].includes(user.role)) {
-    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-  }
-
+  // Semua role login (GURU, WALI_KELAS, ADMIN, SUPERADMIN) boleh mengubah
+  // status kehadiran siswa mana pun, tanpa dibatasi kelas ampuan.
   if (isRateLimited(`status:${user.id}`)) {
     return NextResponse.json({ message: "Terlalu banyak permintaan." }, { status: 429 });
   }
@@ -23,17 +20,6 @@ export async function POST(req: NextRequest) {
   const parsed = setStatusSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ message: "Data tidak valid." }, { status: 400 });
-  }
-
-  // WALI_KELAS hanya boleh mengubah siswa di kelas yang dia ampu
-  if (user.role === "WALI_KELAS") {
-    const student = await prisma.student.findUnique({
-      where: { id: parsed.data.studentId },
-      select: { class: { select: { homeroomTeacherId: true } } },
-    });
-    if (!student || student.class.homeroomTeacherId !== user.id) {
-      return NextResponse.json({ message: "Anda tidak memiliki akses ke siswa ini." }, { status: 403 });
-    }
   }
 
   try {

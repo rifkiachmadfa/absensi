@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth/session";
-import { canSetStudentStatus } from "@/lib/auth/permissions";
+import { canSetStudentStatus, canEditStudentIdentity } from "@/lib/auth/permissions";
 import { getStudentById, getClassOptions } from "@/lib/services/siswa-service";
 import { SiswaForm } from "@/components/siswa/siswa-form";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +19,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { setStudentStatusAction } from "@/app/(protected)/siswa/action";
 
-
-
 export default async function DetailSiswaPage({
   params,
   searchParams,
@@ -28,7 +26,8 @@ export default async function DetailSiswaPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  const actor = await requireAuth();  
+  // Melihat detail siswa dibuka untuk semua role login.
+  const actor = await requireAuth();
   const { id } = await params;
   const { error } = await searchParams;
 
@@ -39,6 +38,7 @@ export default async function DetailSiswaPage({
 
   const classOptions = await getClassOptions();
   const nextStatus = siswa.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+  const canEditIdentity = canEditStudentIdentity(actor, siswa.class.homeroomTeacherId);
 
   return (
     <div className="space-y-6">
@@ -66,37 +66,37 @@ export default async function DetailSiswaPage({
           >
             Lihat / Cetak Kartu
           </Button>
-          {canSetStudentStatus(actor, siswa.class.homeroomTeacherId) && (
 
-          <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button variant={siswa.status === "ACTIVE" ? "destructive" : "outline"} />
-              }
-            >
-              {siswa.status === "ACTIVE" ? "Nonaktifkan Siswa" : "Aktifkan Siswa"}
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {siswa.status === "ACTIVE"
-                    ? `Nonaktifkan ${siswa.name}?`
-                    : `Aktifkan ${siswa.name}?`}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {siswa.status === "ACTIVE"
-                    ? "Data dan riwayat absensi siswa tidak akan dihapus. Siswa nonaktif tidak akan bisa melakukan absensi baru."
-                    : "Siswa ini akan kembali muncul sebagai siswa aktif dan bisa melakukan absensi."}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Batal</AlertDialogCancel>
-                <form action={setStudentStatusAction.bind(null, id, nextStatus)}>
-                  <SubmitButton pendingText="Memproses...">Ya, Lanjutkan</SubmitButton>
-                </form>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          {canSetStudentStatus(actor, siswa.class.homeroomTeacherId) && (
+            <AlertDialog>
+              <AlertDialogTrigger
+                render={
+                  <Button variant={siswa.status === "ACTIVE" ? "destructive" : "outline"} />
+                }
+              >
+                {siswa.status === "ACTIVE" ? "Nonaktifkan Siswa" : "Aktifkan Siswa"}
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {siswa.status === "ACTIVE"
+                      ? `Nonaktifkan ${siswa.name}?`
+                      : `Aktifkan ${siswa.name}?`}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {siswa.status === "ACTIVE"
+                      ? "Data dan riwayat absensi siswa tidak akan dihapus. Siswa nonaktif tidak akan bisa melakukan absensi baru."
+                      : "Siswa ini akan kembali muncul sebagai siswa aktif dan bisa melakukan absensi."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Batal</AlertDialogCancel>
+                  <form action={setStudentStatusAction.bind(null, id, nextStatus)}>
+                    <SubmitButton pendingText="Memproses...">Ya, Lanjutkan</SubmitButton>
+                  </form>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </div>
@@ -107,20 +107,48 @@ export default async function DetailSiswaPage({
         </div>
       )}
 
-      <div className="rounded-lg border p-4">
-        <h2 className="mb-4 text-sm font-semibold">Edit Data Siswa</h2>
-        <SiswaForm
-          mode="edit"
-          studentId={siswa.id}
-          classOptions={classOptions}
-          defaultValues={{
-            nis: siswa.nis,
-            nisn: siswa.nisn,
-            name: siswa.name,
-            classId: siswa.classId,
-          }}
-        />
-      </div>
+      {canEditIdentity ? (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-4 text-sm font-semibold">Edit Data Siswa</h2>
+          <SiswaForm
+            mode="edit"
+            studentId={siswa.id}
+            classOptions={classOptions}
+            defaultValues={{
+              nis: siswa.nis,
+              nisn: siswa.nisn,
+              name: siswa.name,
+              classId: siswa.classId,
+            }}
+          />
+        </div>
+      ) : (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-4 text-sm font-semibold">Data Siswa</h2>
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-muted-foreground">Nama</dt>
+              <dd className="text-sm font-medium">{siswa.name}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">NIS</dt>
+              <dd className="text-sm font-medium">{siswa.nis}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">NISN</dt>
+              <dd className="text-sm font-medium">{siswa.nisn ?? "-"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Kelas</dt>
+              <dd className="text-sm font-medium">{siswa.class.name}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Anda hanya bisa melihat identitas siswa ini. Untuk mengubah data,
+            hubungi wali kelas kelas ini atau admin.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

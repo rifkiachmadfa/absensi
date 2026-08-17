@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/guard";
 import { prisma } from "@/lib/prisma";
 import { getStudentAttendanceDetail } from "@/lib/services/report-service";
 import { getTodayDateOnly } from "@/lib/services/attendance-service";
@@ -16,6 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requireAuth } from "@/lib/auth/session";
+
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import { StudentExportButton } from "@/components/laporan/student-export-button";
 
@@ -39,7 +40,7 @@ export default async function LaporanSiswaDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ mode?: string; date?: string; month?: string }>;
 }) {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN", "WALI_KELAS"]);
+    await requireAuth();
   const { id } = await params;
   const raw = await searchParams;
 
@@ -47,17 +48,6 @@ export default async function LaporanSiswaDetailPage({
   const mode = raw.mode === "monthly" ? "monthly" : "daily";
   const date = raw.date || toISODateOnly(today);
   const month = raw.month || toISODateOnly(today).slice(0, 7);
-
-  // WALI_KELAS hanya boleh melihat siswa di kelas yang diampu.
-  if (actor.role === "WALI_KELAS") {
-    const student = await prisma.student.findUnique({
-      where: { id },
-      select: { class: { select: { homeroomTeacherId: true } } },
-    });
-    if (!student || student.class.homeroomTeacherId !== actor.id) {
-      notFound();
-    }
-  }
 
   const detail = await getStudentAttendanceDetail(
     mode === "daily" ? { studentId: id, mode: "daily", date } : { studentId: id, mode: "monthly", month }

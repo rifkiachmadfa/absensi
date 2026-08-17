@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guard";
+import { requireAuth } from "@/lib/auth/session";
+import { canCreateStudentSomewhere } from "@/lib/auth/permissions";
 import { listStudents, getClassOptions } from "@/lib/services/siswa-service";
 import { studentFilterSchema } from "@/lib/validations/siswa";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +22,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { requireAuth } from "@/lib/auth/session";
-import { canCreateStudentSomewhere } from "@/lib/auth/permissions";
-
-const actor = await requireAuth();
-
 export default async function SiswaPage({
   searchParams,
 }: {
@@ -36,7 +32,10 @@ export default async function SiswaPage({
     page?: string;
   }>;
 }) {
-  await requireRole(["SUPERADMIN", "ADMIN"]);
+  // Semua role login (GURU, WALI_KELAS, ADMIN, SUPERADMIN) boleh melihat
+  // seluruh siswa. Aksi tambah/edit/nonaktifkan diatur per-tombol lewat
+  // fungsi di lib/auth/permissions.ts, bukan lewat guard halaman ini.
+  const actor = await requireAuth();
   const rawParams = await searchParams;
 
   const filter = studentFilterSchema.parse({
@@ -78,8 +77,8 @@ export default async function SiswaPage({
             Kartu Siswa
           </Button>
           {canCreateStudentSomewhere(actor) && (
-  <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
-)}
+            <Button render={<Link href="/siswa/tambah" />}>+ Tambah Siswa</Button>
+          )}
         </div>
       </div>
 

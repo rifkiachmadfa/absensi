@@ -18,12 +18,7 @@ export async function GET(req: NextRequest) {
 
   let classId = parsed.data.classId;
 
-  // WALI_KELAS dibatasi hanya bisa melihat kelasnya sendiri
-  if (user.role === "WALI_KELAS") {
-    const owned = await prisma.class.findFirst({ where: { homeroomTeacherId: user.id } });
-    if (!owned) return NextResponse.json({ message: "Kelas tidak ditemukan." }, { status: 404 });
-    classId = owned.id;
-  }
+
 
   try {
     const recap = await AttendanceService.getDailyRecap({

@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/guard";
-import { prisma } from "@/lib/prisma";
+import { requireAuth } from "@/lib/auth/session";
 import {
   getAttendanceReport,
   getReportClassOptions,
@@ -33,27 +32,17 @@ export default async function LaporanPage({
     classId?: string;
   }>;
 }) {
-  const actor = await requireRole(["SUPERADMIN", "ADMIN", "WALI_KELAS"]);
+  // Semua role login (GURU, WALI_KELAS, ADMIN, SUPERADMIN) boleh melihat
+  // riwayat absensi seluruh siswa dari semua kelas, tanpa dibatasi kelas
+  // ampuan.
+  await requireAuth();
   const raw = await searchParams;
 
   const today = getTodayDateOnly();
   const mode = raw.mode === "monthly" ? "monthly" : "daily";
   const date = raw.date || toISODateOnly(today);
   const month = raw.month || toISODateOnly(today).slice(0, 7);
-
-  let classId = raw.classId || undefined;
-
-  // WALI_KELAS hanya boleh melihat laporan kelasnya sendiri -- classId dari
-  // query string TIDAK dipercaya, selalu dipaksa dari data kelas yang diampu.
-  let lockedClassName: string | null = null;
-  if (actor.role === "WALI_KELAS") {
-    const owned = await prisma.class.findFirst({
-      where: { homeroomTeacherId: actor.id },
-      select: { id: true, name: true },
-    });
-    classId = owned?.id;
-    lockedClassName = owned?.name ?? null;
-  }
+  const classId = raw.classId || undefined;
 
   const [report, classOptions] = await Promise.all([
     getAttendanceReport(
@@ -61,7 +50,7 @@ export default async function LaporanPage({
         ? { mode: "daily", date, classId }
         : { mode: "monthly", month, classId }
     ),
-    actor.role === "WALI_KELAS" ? Promise.resolve([]) : getReportClassOptions(),
+    getReportClassOptions(),
   ]);
 
   const query = (overrides: Record<string, string | undefined>) => {
@@ -134,37 +123,27 @@ export default async function LaporanPage({
             </div>
           )}
 
-          {actor.role !== "WALI_KELAS" && (
-            <div className="space-y-1">
-              <Label htmlFor="classId">Kelas</Label>
-              <Select name="classId" defaultValue={raw.classId ?? ""}>
-                <SelectTrigger id="classId" className="w-44">
-                  <SelectValue placeholder="Semua Kelas" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Semua Kelas</SelectItem>
-                  {classOptions.map((kelas) => (
-                    <SelectItem key={kelas.id} value={kelas.id}>
-                      {kelas.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="space-y-1">
+            <Label htmlFor="classId">Kelas</Label>
+            <Select name="classId" defaultValue={raw.classId ?? ""}>
+              <SelectTrigger id="classId" className="w-44">
+                <SelectValue placeholder="Semua Kelas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Semua Kelas</SelectItem>
+                {classOptions.map((kelas) => (
+                  <SelectItem key={kelas.id} value={kelas.id}>
+                    {kelas.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <Button type="submit" variant="outline">
             Terapkan
           </Button>
         </form>
-
-        {lockedClassName && (
-          <p className="text-sm text-muted-foreground">
-            Menampilkan laporan untuk kelas{" "}
-            <span className="font-medium text-foreground">{lockedClassName}</span>{" "}
-            (wali kelas).
-          </p>
-        )}
       </div>
 
       <ReportTabs report={report} />

@@ -3,7 +3,11 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth/session";
-import { canCreateStudent, canSetStudentStatus } from "@/lib/auth/permissions";
+import {
+  canCreateStudent,
+  canSetStudentStatus,
+  canEditStudentIdentity,
+} from "@/lib/auth/permissions";
 import { studentFormSchema } from "@/lib/validations/siswa";
 import {
   createStudent,
@@ -66,9 +70,14 @@ export async function updateStudentAction(
   _prevState: StudentFormState,
   formData: FormData
 ): Promise<StudentFormState> {
-  // Ubah identitas siswa (nama/NIS/NISN/kelas) boleh dilakukan semua role login,
-  // sesuai aturan: GURU & WALI_KELAS boleh merubah identitas siswa.
   const actor = await requireAuth();
+
+  const homeroomTeacherId = await getStudentClassHomeroomTeacherId(id);
+  if (!canEditStudentIdentity(actor, homeroomTeacherId)) {
+    return {
+      error: "Anda tidak memiliki izin untuk mengubah identitas siswa ini.",
+    };
+  }
 
   const parsed = parseStudentForm(formData);
   if (!parsed.success) {

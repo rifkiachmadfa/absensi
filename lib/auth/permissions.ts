@@ -10,12 +10,16 @@ import type { SessionUser } from "./session";
  * yang ia ampu (Class.homeroomTeacherId === user.id).
  *
  * - GURU (default role semua user): scan, absen manual, ubah status
- *   kehadiran, lihat & export absensi, lihat & ubah identitas siswa.
- *   TIDAK bisa: tambah siswa, ubah status aktif siswa, tambah kelas,
- *   kelola akun guru, tahun ajaran, jadwal absensi.
- * - WALI_KELAS: hak GURU + tambah siswa & ubah status aktif siswa,
- *   TAPI hanya untuk kelas yang ia ampu. Di kelas lain, haknya
- *   turun jadi selevel GURU.
+ *   kehadiran siswa MANA PUN (tanpa kecuali), lihat riwayat/laporan
+ *   absensi seluruh siswa & kelas, lihat daftar & statistik kelas,
+ *   lihat seluruh data siswa.
+ *   TIDAK bisa: ubah identitas siswa, tambah siswa, ubah status aktif
+ *   siswa, kelola kelas, kelola akun guru, tahun ajaran, jadwal
+ *   absensi, akses kartu siswa.
+ * - WALI_KELAS: hak GURU + tambah siswa, ubah status aktif siswa, dan
+ *   ubah identitas siswa — TAPI hanya untuk kelas yang ia ampu. Di
+ *   kelas lain, haknya turun jadi selevel GURU. Juga punya akses
+ *   Kartu Siswa (semua kelas, karena sifatnya cetak/lihat saja).
  * - ADMIN: hak WALI_KELAS/GURU di SEMUA kelas + kelola kelas penuh +
  *   kelola akun guru (buat/edit/hapus/identitas/status/reset password)
  *   + tautkan wali kelas. TIDAK bisa: tahun ajaran, jadwal absensi.
@@ -40,16 +44,19 @@ function isHomeroomOwner(
   );
 }
 
-// ---------- ABSENSI (semua role login boleh) ----------
+// ---------- ABSENSI (semua role login boleh, tanpa scoping kelas) ----------
 export function canScanAttendance(_user: SessionUser) {
   return true;
 }
 export function canManualAttendance(_user: SessionUser) {
   return true;
 }
+/** Ubah status kehadiran (hadir/terlambat/sakit/izin/dispensasi/alpha)
+ *  siswa mana pun — semua role login, tanpa kecuali, tanpa scoping kelas. */
 export function canEditAttendanceStatus(_user: SessionUser) {
   return true;
 }
+/** Lihat riwayat/rekap absensi siswa mana pun — semua role login. */
 export function canViewAttendance(_user: SessionUser) {
   return true;
 }
@@ -58,13 +65,24 @@ export function canExportAttendance(_user: SessionUser) {
 }
 
 // ---------- SISWA ----------
+/** Lihat seluruh data siswa — semua role login boleh. */
 export function canViewStudents(_user: SessionUser) {
   return true;
 }
 
-/** Edit identitas siswa (nama, NIS, NISN, pindah kelas) — semua role boleh. */
-export function canEditStudentIdentity(_user: SessionUser) {
-  return true;
+/**
+ * Edit identitas siswa (nama, NIS, NISN, pindah kelas).
+ * - SUPERADMIN/ADMIN: semua siswa, semua kelas.
+ * - WALI_KELAS: hanya siswa yang ada di kelas yang ia ampu.
+ * - GURU: tidak boleh (GURU hanya boleh input/ubah status kehadiran,
+ *   bukan data identitas siswa).
+ */
+export function canEditStudentIdentity(
+  user: SessionUser,
+  studentClassHomeroomTeacherId: string | null | undefined
+) {
+  if (isAdminOrAbove(user)) return true;
+  return isHomeroomOwner(user, studentClassHomeroomTeacherId);
 }
 
 /**
@@ -112,6 +130,16 @@ export function canManageClasses(user: SessionUser) {
 /** Menautkan guru menjadi wali kelas — hanya SUPERADMIN/ADMIN. */
 export function canAssignHomeroomTeacher(user: SessionUser) {
   return isAdminOrAbove(user);
+}
+
+// ---------- KARTU SISWA & LAPORAN ----------
+/** Lihat/cetak kartu siswa — SUPERADMIN, ADMIN, WALI_KELAS. */
+export function canAccessStudentCard(user: SessionUser) {
+  return isAdminOrAbove(user) || user.role === "WALI_KELAS";
+}
+/** Lihat halaman laporan/riwayat absensi — semua role login, tanpa kecuali. */
+export function canAccessReports(_user: SessionUser) {
+  return true;
 }
 
 // ---------- AKUN GURU ----------
