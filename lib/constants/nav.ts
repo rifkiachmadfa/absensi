@@ -64,11 +64,10 @@ export const NAV_ITEMS: NavItem[] = [
     icon: History,
     roles: ["SUPERADMIN"],
   },
-  {
+{
     href: "/pengaturan",
     label: "Pengaturan",
     icon: Settings,
-    roles: ["SUPERADMIN"],
-    comingSoon: true,
+    roles: ["SUPERADMIN", "ADMIN", "GURU", "WALI_KELAS"],
   },
 ]
