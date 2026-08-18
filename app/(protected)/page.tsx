@@ -4,10 +4,12 @@ import {
   AttendanceService,
   getTodayDateOnly,
 } from "@/lib/services/attendance-service";
+import { getAttendanceTrend } from "@/lib/services/report-service";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { RecentAttendance } from "@/components/dashboard/recent-attendance";
 import { ClassStats } from "@/components/dashboard/class-stats"; // ✅ benar
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { AttendanceTrendChart } from "@/components/dashboard/attendance-trend-chart";
 import { Users, CheckCircle2, Clock, UserX } from "lucide-react";
 
 const TIMEZONE = "Asia/Jakarta";
@@ -38,11 +40,14 @@ export default async function DashboardPage() {
     classId = owned?.id;
   }
 
-  const [recap, classBreakdown, recentActivity] = await Promise.all([
-    AttendanceService.getDailyRecap({ date: today, classId }),
-    AttendanceService.getClassBreakdown({ date: today, classId }),
-    AttendanceService.getRecentActivity({ date: today, classId, limit: 8 }),
-  ]);
+  const [recap, classBreakdown, recentActivity, dailyTrend, monthlyTrend] =
+    await Promise.all([
+      AttendanceService.getDailyRecap({ date: today, classId }),
+      AttendanceService.getClassBreakdown({ date: today, classId }),
+      AttendanceService.getRecentActivity({ date: today, classId, limit: 8 }),
+      getAttendanceTrend({ mode: "daily", classId }),
+      getAttendanceTrend({ mode: "monthly", classId }),
+    ]);
 
   const hadirTotal = recap.counts.HADIR + recap.counts.TERLAMBAT;
   const persentaseKehadiran =
@@ -61,6 +66,11 @@ export default async function DashboardPage() {
           </h1>
         </div>
       </div>
+
+      {/* Grafik tren kehadiran — diletakkan di atas shortcut Absensi/Laporan/
+          Daftar Siswa sesuai permintaan; toggle Harian/Bulanan tidak butuh
+          request tambahan karena kedua dataset sudah di-fetch sekaligus. */}
+      <AttendanceTrendChart dailyPoints={dailyTrend.points} monthlyPoints={monthlyTrend.points} />
 
       <QuickActions role={user.role} />
 

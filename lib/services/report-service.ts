@@ -82,6 +82,31 @@ export type StudentReportDetail = {
   log: StudentAttendanceLogEntry[]; // hanya hari sekolah (Senin-Jumat), terbaru dulu
 };
 
+// Dipakai oleh grafik tren kehadiran di dashboard (Bar Chart harian/bulanan,
+// dengan tab status: Hadir / Sakit / Izin / Alpha).
+export type TrendMode = "daily" | "monthly";
+export type TrendStatus = "HADIR" | "SAKIT" | "IZIN" | "ALPHA";
+
+export type AttendanceTrendPoint = {
+  key: string; // ISO date (daily) atau "YYYY-MM" (monthly)
+  label: string; // label singkat sumbu-X, mis. "12 Ags" atau "Ags 2026"
+  totalSiswa: number;
+  hadir: number; // HADIR + TERLAMBAT (tetap dihitung sebagai "masuk sekolah")
+  terlambat: number;
+  sakit: number;
+  izin: number;
+  alpha: number;
+  persentaseHadir: number;
+  persentaseSakit: number;
+  persentaseIzin: number;
+  persentaseAlpha: number;
+};
+
+export type AttendanceTrendPayload = {
+  mode: TrendMode;
+  points: AttendanceTrendPoint[];
+};
+
 // ============================================================
 // Helpers -- semua tanggal di sini adalah "date-only" (midnight UTC yang
 // merepresentasikan tanggal kalender Asia/Jakarta), konsisten dengan
@@ -434,6 +459,149 @@ export async function getStudentAttendanceDetail(
     summary: { ...counts, belumAbsen, totalSchoolDays: schoolDays, persentaseKehadiran },
     log,
   };
+}
+
+// ============================================================
+// Tren persentase kehadiran keseluruhan siswa -- dipakai oleh Bar Chart
+// di dashboard (§ Development Rules: satu sumber logic, reuse helper
+// tanggal/tally yang sudah ada di file ini, tidak membuat service baru).
+//
+// daily   -> 14 hari sekolah (Senin-Jumat) terakhir, satu batang = satu hari
+// monthly -> 6 bulan kalender terakhir, satu batang = satu bulan
+// ============================================================
+
+const SHORT_MONTH_LABEL = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Ags", "Sep", "Okt", "Nov", "Des",
+];
+
+const DAILY_TREND_POINTS = 14;
+const MONTHLY_TREND_POINTS = 6;
+
+// Helper bersama untuk daily & monthly: hitung 4 kategori persentase
+// (Hadir/Sakit/Izin/Alpha) dari satu set counts + satu denom, supaya
+// logic tidak diduplikasi antara dua mode.
+function buildTrendCounts(
+  counts: Omit<StatusCounts, "belumAbsen">,
+  denom: number
+): Pick<
+  AttendanceTrendPoint,
+  "hadir" | "terlambat" | "sakit" | "izin" | "alpha" | "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha"
+> {
+  const hadirTotal = counts.hadir + counts.terlambat;
+  const pct = (n: number) => (denom > 0 ? Math.round((n / denom) * 100) : 0);
+  return {
+    hadir: counts.hadir,
+    terlambat: counts.terlambat,
+    sakit: counts.sakit,
+    izin: counts.izin,
+    alpha: counts.alpha,
+    persentaseHadir: pct(hadirTotal),
+    persentaseSakit: pct(counts.sakit),
+    persentaseIzin: pct(counts.izin),
+    persentaseAlpha: pct(counts.alpha),
+  };
+}
+
+export async function getAttendanceTrend(params: {
+  mode: TrendMode;
+  classId?: string;
+}): Promise<AttendanceTrendPayload> {
+  const { mode, classId } = params;
+  const today = getTodayDateOnly();
+
+  const students = await prisma.student.findMany({
+    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
+    select: { id: true },
+  });
+  const totalSiswa = students.length;
+  const studentIds = students.map((s) => s.id);
+
+  if (totalSiswa === 0) {
+    return { mode, points: [] };
+  }
+
+  if (mode === "daily") {
+    // Kumpulkan N hari sekolah terakhir (mundur dari hari ini).
+    const schoolDates: Date[] = [];
+    const cursor = new Date(today);
+    while (schoolDates.length < DAILY_TREND_POINTS) {
+      if (!isWeekendDate(cursor)) schoolDates.unshift(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    const rangeStart = schoolDates[0];
+    const rangeEnd = schoolDates[schoolDates.length - 1];
+
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        date: { gte: rangeStart, lte: rangeEnd },
+        studentId: { in: studentIds },
+      },
+      select: { date: true, status: true },
+    });
+
+    const byDate = new Map<string, AttendanceStatus[]>();
+    for (const a of attendances) {
+      const key = toISODateOnly(a.date);
+      const list = byDate.get(key);
+      if (list) list.push(a.status);
+      else byDate.set(key, [a.status]);
+    }
+
+    const points: AttendanceTrendPoint[] = schoolDates.map((d) => {
+      const key = toISODateOnly(d);
+      const counts = tallyStatuses(byDate.get(key) ?? []);
+      return {
+        key,
+        label: new Intl.DateTimeFormat("id-ID", {
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        }).format(d),
+        totalSiswa,
+        ...buildTrendCounts(counts, totalSiswa),
+      };
+    });
+
+    return { mode, points };
+  }
+
+  // mode === "monthly"
+  const monthStarts: Date[] = [];
+  for (let i = MONTHLY_TREND_POINTS - 1; i >= 0; i--) {
+    monthStarts.push(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i, 1)));
+  }
+
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      date: { gte: monthStarts[0], lte: today },
+      studentId: { in: studentIds },
+    },
+    select: { date: true, status: true },
+  });
+
+  const points: AttendanceTrendPoint[] = monthStarts.map((monthStart) => {
+    const monthEndRequested = new Date(
+      Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)
+    );
+    const monthEnd = monthEndRequested.getTime() > today.getTime() ? today : monthEndRequested;
+    const schoolDays = countSchoolDays(monthStart, monthEnd);
+
+    const inMonth = attendances.filter(
+      (a) => a.date.getTime() >= monthStart.getTime() && a.date.getTime() <= monthEnd.getTime()
+    );
+    const counts = tallyStatuses(inMonth.map((a) => a.status));
+    const denom = totalSiswa * schoolDays;
+
+    return {
+      key: `${monthStart.getUTCFullYear()}-${String(monthStart.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: `${SHORT_MONTH_LABEL[monthStart.getUTCMonth()]} ${monthStart.getUTCFullYear()}`,
+      totalSiswa,
+      ...buildTrendCounts(counts, denom),
+    };
+  });
+
+  return { mode, points };
 }
 
 export async function getReportClassOptions() {
