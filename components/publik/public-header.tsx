@@ -8,9 +8,9 @@ import { SCHOOL_LOGO_URL } from "@/lib/kartu-siswa/constants";
 // harus bisa diakses tanpa login sama sekali.
 export function PublicHeader() {
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 border-b border-[#DCE7E9] bg-white px-4">
+    <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 border-b border-[#DCE7E9] bg-white/95 px-4 backdrop-blur supports-backdrop-filter:bg-white/80">
       <Link href="/" className="flex min-w-0 items-center gap-2.5">
-        <div className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-[8px]">
+        <div className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-[8px] ring-1 ring-[#DCE7E9]">
           <Image
             src={SCHOOL_LOGO_URL}
             alt="Logo SMK Yadika"
@@ -27,7 +27,7 @@ export function PublicHeader() {
 
       <Link
         href="/login"
-        className="flex shrink-0 items-center gap-1.5 rounded-[10px] border border-[#DCE7E9] px-3 py-1.5 text-[13px] font-medium text-[#17313A] transition-colors hover:bg-[#F1F5F5]"
+        className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-[#17586F] px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-[#123F50]"
       >
         <LogIn className="size-3.5" />
         <span className="hidden sm:inline">Login Admin/Guru</span>

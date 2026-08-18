@@ -6,7 +6,19 @@
 // sepenuhnya: tidak ada tombol ubah status, hapus, atau export.
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  ChevronLeft,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Stethoscope,
+  FileText as FileIcon,
+  BadgeCheck,
+  XCircle,
+  CircleDashed,
+  TrendingUp,
+} from "lucide-react";
 import { getStudentById } from "@/lib/services/siswa-service";
 import { getStudentAttendanceDetail } from "@/lib/services/report-service";
 import { getTodayDateOnly } from "@/lib/services/attendance-service";
@@ -29,11 +41,60 @@ function toISODateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function SummaryStat({ label, value }: { label: string; value: string | number }) {
+function initials(name: string) {
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function attendancePctTone(pct: number) {
+  if (pct >= 90) return { text: "text-[#16A34A]", bg: "bg-[#F0FDF4]" };
+  if (pct >= 75) return { text: "text-[#D97706]", bg: "bg-[#FFFBEB]" };
+  return { text: "text-[#DC2626]", bg: "bg-[#FEF2F2]" };
+}
+
+// Kartu ringkasan status -- warna & ikon mengikuti konvensi yang sama dengan
+// components/publik/public-recent-attendance.tsx supaya konsisten di seluruh
+// halaman publik (Hadir=success, Terlambat=warning, Sakit/Izin/Dispensasi=
+// teal netral, Alpha=danger, Belum Diisi=neutral, %Kehadiran=brand primary).
+function SummaryStat({
+  label,
+  value,
+  icon: Icon,
+  className,
+  emphasis,
+}: {
+  label: string;
+  value: string | number;
+  icon: LucideIcon;
+  className: string;
+  emphasis?: boolean;
+}) {
   return (
-    <div className="rounded-[14px] border border-[#DCE7E9] bg-white p-4">
-      <p className="text-[13px] text-[#71858C]">{label}</p>
-      <p className="text-2xl font-bold text-[#17313A]">{value}</p>
+    <div
+      className={`rounded-[14px] border p-4 ${
+        emphasis ? "border-transparent" : "border-[#DCE7E9] bg-white"
+      }`}
+      style={emphasis ? { background: "linear-gradient(135deg, #17586F, #1C7F88)" } : undefined}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className={`text-[13px] ${emphasis ? "text-white/80" : "text-[#71858C]"}`}>
+          {label}
+        </p>
+        <div
+          className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] ${
+            emphasis ? "bg-white/15 text-white" : className
+          }`}
+        >
+          <Icon className="size-3.5" strokeWidth={2.5} />
+        </div>
+      </div>
+      <p className={`mt-1 text-2xl font-bold ${emphasis ? "text-white" : "text-[#17313A]"}`}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -66,6 +127,8 @@ export default async function CekKehadiranPage({
     notFound();
   }
 
+  const pctTone = attendancePctTone(detail.summary.persentaseKehadiran);
+
   return (
     <div className="min-h-screen bg-[#F8FAFA]">
       <PublicHeader />
@@ -81,15 +144,44 @@ export default async function CekKehadiranPage({
           Kembali ke Pencarian
         </Button>
 
-        <div>
-          <h1 className="text-[26px] font-bold tracking-tight text-[#17313A]">
-            {detail.student.name}
-          </h1>
-          <p className="text-sm text-[#48616A]">
-            NIS {detail.student.nis} • NISN {detail.student.nisn} •{" "}
-            {detail.student.className}
-          </p>
-          <p className="mt-1 text-sm text-[#71858C]">{detail.period.label}</p>
+        {/* Profil siswa -- avatar inisial + chip identitas, menggantikan
+            heading polos supaya halaman terasa seperti "kartu identitas
+            digital" (selaras dengan tema kartu siswa di UI_RULES §25). */}
+        <div className="overflow-hidden rounded-[18px] border border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+          <div className="h-14 bg-gradient-to-r from-[#17586F] to-[#1C7F88]" />
+          <div className="flex flex-col gap-4 px-5 pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="-mt-8 flex items-end gap-4">
+              <div className="flex size-16 shrink-0 items-center justify-center rounded-full border-4 border-white bg-[#EAF7F8] text-[19px] font-bold text-[#17586F] shadow-sm">
+                {initials(detail.student.name)}
+              </div>
+              <div className="min-w-0 pb-1">
+                <h1 className="truncate text-[22px] font-bold tracking-tight text-[#17313A] sm:text-[26px]">
+                  {detail.student.name}
+                </h1>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
+                    NIS {detail.student.nis}
+                  </span>
+                  <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
+                    NISN {detail.student.nisn}
+                  </span>
+                  <span className="rounded-full bg-[#EAF7F8] px-2.5 py-1 text-[11px] font-medium text-[#17586F]">
+                    {detail.student.className}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className={`flex shrink-0 items-center gap-2 rounded-[12px] px-3 py-2 ${pctTone.bg}`}>
+              <TrendingUp className={`size-4 ${pctTone.text}`} strokeWidth={2.5} />
+              <div>
+                <p className={`text-lg font-bold leading-none ${pctTone.text}`}>
+                  {detail.summary.persentaseKehadiran}%
+                </p>
+                <p className="mt-0.5 text-[11px] text-[#71858C]">{detail.period.label}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Filter bulan -- read-only, hanya untuk memilih periode yang
@@ -99,7 +191,10 @@ export default async function CekKehadiranPage({
           method="get"
         >
           <div className="space-y-1">
-            <Label htmlFor="month">Bulan</Label>
+            <Label htmlFor="month" className="flex items-center gap-1.5 text-[#48616A]">
+              <Calendar className="size-3.5" />
+              Bulan
+            </Label>
             <Input
               id="month"
               type="month"
@@ -118,16 +213,54 @@ export default async function CekKehadiranPage({
         </form>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryStat label="Hadir" value={detail.summary.hadir} />
-          <SummaryStat label="Terlambat" value={detail.summary.terlambat} />
-          <SummaryStat label="Sakit" value={detail.summary.sakit} />
-          <SummaryStat label="Izin" value={detail.summary.izin} />
-          <SummaryStat label="Dispensasi" value={detail.summary.dispensasi} />
-          <SummaryStat label="Alpha" value={detail.summary.alpha} />
-          <SummaryStat label="Belum Diisi" value={detail.summary.belumAbsen} />
+          <SummaryStat
+            label="Hadir"
+            value={detail.summary.hadir}
+            icon={CheckCircle2}
+            className="bg-[#F0FDF4] text-[#16A34A]"
+          />
+          <SummaryStat
+            label="Terlambat"
+            value={detail.summary.terlambat}
+            icon={Clock}
+            className="bg-[#FFFBEB] text-[#D97706]"
+          />
+          <SummaryStat
+            label="Sakit"
+            value={detail.summary.sakit}
+            icon={Stethoscope}
+            className="bg-[#EAF7F8] text-[#17586F]"
+          />
+          <SummaryStat
+            label="Izin"
+            value={detail.summary.izin}
+            icon={FileIcon}
+            className="bg-[#EAF7F8] text-[#17586F]"
+          />
+          <SummaryStat
+            label="Dispensasi"
+            value={detail.summary.dispensasi}
+            icon={BadgeCheck}
+            className="bg-[#EAF7F8] text-[#17586F]"
+          />
+          <SummaryStat
+            label="Alpha"
+            value={detail.summary.alpha}
+            icon={XCircle}
+            className="bg-[#FEF2F2] text-[#DC2626]"
+          />
+          <SummaryStat
+            label="Belum Diisi"
+            value={detail.summary.belumAbsen}
+            icon={CircleDashed}
+            className="bg-[#F1F5F5] text-[#48616A]"
+          />
           <SummaryStat
             label="% Kehadiran"
             value={`${detail.summary.persentaseKehadiran}%`}
+            icon={TrendingUp}
+            className="bg-white/15 text-white"
+            emphasis
           />
         </div>
 

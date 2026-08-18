@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   CheckCircle2,
   Clock,
   Stethoscope,
@@ -47,12 +48,30 @@ export function PublicRecentAttendance({ items }: { items: RecentAttendanceItem[
   return (
     <Card className="h-full rounded-xl border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
       <CardHeader>
-        <CardTitle className="text-[18px] font-semibold text-[#17313A]">
-          Absensi Terbaru
-        </CardTitle>
-        <CardDescription className="text-[13px] text-[#71858C]">
-          Scan &amp; input manual hari ini
-        </CardDescription>
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[#EAF7F8] text-[#17586F]">
+              <Activity className="size-4" strokeWidth={2} />
+            </div>
+            <div>
+              <CardTitle className="text-[18px] font-semibold text-[#17313A]">
+                Absensi Terbaru
+              </CardTitle>
+              <CardDescription className="text-[13px] text-[#71858C]">
+                Scan &amp; input manual hari ini
+              </CardDescription>
+            </div>
+          </div>
+          {items.length > 0 && (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#F0FDF4] px-2 py-1 text-[11px] font-medium text-[#16A34A]">
+              <span className="relative flex size-1.5">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#16A34A] opacity-75" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-[#16A34A]" />
+              </span>
+              Live
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (

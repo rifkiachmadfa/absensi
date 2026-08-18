@@ -52,22 +52,29 @@ export function PublicStudentSearch() {
   }, [query, runSearch]);
 
   return (
-    <div className="rounded-2xl border border-[#DCE7E9] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-5">
-      <h2 className="text-[18px] font-semibold text-[#17313A]">
-        Cek Kehadiran Siswa
-      </h2>
-      <p className="mt-0.5 text-[13px] text-[#71858C]">
-        Cari berdasarkan nama atau NIS/NISN untuk melihat rekap kehadiran
-        bulanan.
-      </p>
+    <div className="relative overflow-hidden rounded-[18px] border border-[#DCE7E9] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.08)] sm:p-5">
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[#EAF7F8] text-[#17586F]">
+          <Search className="size-5" strokeWidth={2} />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-[18px] font-semibold text-[#17313A]">
+            Cek Kehadiran Siswa
+          </h2>
+          <p className="mt-0.5 text-[13px] text-[#71858C]">
+            Cari berdasarkan nama atau NIS/NISN untuk melihat rekap kehadiran
+            bulanan.
+          </p>
+        </div>
+      </div>
 
-      <div className="relative mt-3">
+      <div className="relative mt-3.5">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#71858C]" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Ketik nama atau NIS/NISN siswa..."
-          className="h-11 rounded-[10px] border-[#DCE7E9] pl-9 focus-visible:border-[#22949E] focus-visible:ring-[#22949E]/20"
+          className="h-12 rounded-[10px] border-[#DCE7E9] pl-9 text-[15px] focus-visible:border-[#22949E] focus-visible:ring-[#22949E]/20"
           aria-label="Cari siswa"
         />
         {isLoading && (
@@ -88,9 +95,17 @@ export function PublicStudentSearch() {
               <button
                 type="button"
                 onClick={() => router.push(`/cek-kehadiran/${s.id}`)}
-                className="flex w-full items-center justify-between gap-3 bg-white px-3 py-2.5 text-left transition-colors hover:bg-[#F8FAFA]"
+                className="flex w-full items-center gap-3 bg-white px-3 py-2.5 text-left transition-colors hover:bg-[#F8FAFA]"
               >
-                <span className="min-w-0">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#EAF7F8] text-[11px] font-semibold text-[#17586F]">
+                  {s.name
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((part) => part[0])
+                    .join("")
+                    .toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-[#17313A]">
                     {s.name}
                   </span>

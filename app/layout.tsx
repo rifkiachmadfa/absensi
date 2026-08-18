@@ -9,8 +9,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Sistem Absensi Siswa",
-  description: "Sistem Absensi Siswa berbasis QR — Modern School",
+  title: "Sistem Absensi Murid",
+  description: "Sistem Absensi Murid berbasis QR — Modern School",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
