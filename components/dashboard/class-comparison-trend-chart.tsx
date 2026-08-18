@@ -203,8 +203,8 @@ export function ClassComparisonTrendChart({
     };
   }, [activeSeries, colorByClassId, data.labels]);
 
-  return (
-    <Card className="rounded-xl border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+    return (
+    <Card className="flex h-full flex-col rounded-xl border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
       <CardHeader>
         <CardTitle className="text-[18px] font-semibold text-[#17313A]">
           Perbandingan Kehadiran per Kelas
@@ -214,9 +214,6 @@ export function ClassComparisonTrendChart({
         </CardDescription>
       </CardHeader>
 
-      {/* Checkbox filter kelas -- warna dot mengikuti warna garis di chart,
-          jadi berfungsi ganda sebagai legend. §UI_RULES §32: status/kelas
-          tidak hanya dibedakan lewat warna, tetap ada label teks nama kelas. */}
       {data.series.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-2 px-6 pb-1">
           {data.series.map((s) => {
@@ -248,17 +245,20 @@ export function ClassComparisonTrendChart({
         </div>
       )}
 
-      <CardContent>
+      {/* flex-1: mengisi sisa tinggi Card (Card sudah h-full mengikuti baris
+          grid), supaya tinggi card ini sejajar dengan card Top 5 Murid Paling
+          Disiplin di sebelahnya, bukan cuma setinggi konten. */}
+      <CardContent className="flex flex-1 flex-col">
         {data.series.length === 0 ? (
-          <p className="py-10 text-center text-sm text-[#71858C]">
+          <p className="flex flex-1 items-center justify-center text-center text-sm text-[#71858C]">
             Belum ada data kelas untuk ditampilkan.
           </p>
         ) : activeSeries.length === 0 ? (
-          <p className="py-10 text-center text-sm text-[#71858C]">
+          <p className="flex flex-1 items-center justify-center text-center text-sm text-[#71858C]">
             Pilih minimal satu kelas untuk menampilkan grafik.
           </p>
         ) : (
-          <div className="h-[240px] w-full sm:h-[260px]">
+          <div className="h-full min-h-[240px] w-full flex-1 sm:min-h-[260px]">
             <canvas
               ref={canvasRef}
               role="img"

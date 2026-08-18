@@ -23,22 +23,23 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Hanya identifikasi siswa dari QR -- BELUM menyimpan absensi.
-    // Status kehadiran dipilih manual oleh guru lewat POST /api/absensi/confirm,
-    // karena jam masuk sekolah bisa berbeda-beda setiap hari (Section 11).
-    const result = await AttendanceService.identify({
+    // Identifikasi siswa dari QR sekaligus simpan absensinya. Status
+    // (HADIR/TERLAMBAT) dihitung otomatis dari AttendanceSchedule -- guru
+    // tidak perlu memilih status secara manual lagi (Section 11 & 29).
+    const result = await AttendanceService.checkIn({
       identifier: parsed.data.qrToken,
       method: AttendanceMethod.QR,
+      recordedById: user.id,
     });
 
     const statusCode =
-      result.type === "SUCCESS" ? 200 :
+      result.type === "SUCCESS" ? 201 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
       result.type === "STUDENT_INACTIVE" ? 409 : 200;
 
     return NextResponse.json(result, { status: statusCode });
   } catch (err) {
-    console.error("Identify (scan) attendance error:", err);
+    console.error("Check-in (scan) attendance error:", err);
     return NextResponse.json({ message: "Terjadi kesalahan pada server." }, { status: 500 });
   }
 }
