@@ -36,24 +36,20 @@ import {
 } from "@/components/ui/table";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import { PublicHeader } from "@/components/publik/public-header";
+import { PublicStudentProfileCard } from "@/components/publik/public-student-profile-card";
 
 function toISODateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function initials(name: string) {
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-}
-
 function attendancePctTone(pct: number) {
-  if (pct >= 90) return { text: "text-[#16A34A]", bg: "bg-[#F0FDF4]" };
-  if (pct >= 75) return { text: "text-[#D97706]", bg: "bg-[#FFFBEB]" };
-  return { text: "text-[#DC2626]", bg: "bg-[#FEF2F2]" };
+  if (pct >= 90) {
+    return { text: "text-[#16A34A]", bg: "bg-[#F0FDF4]", border: "border-[#BBF7D0]" };
+  }
+  if (pct >= 75) {
+    return { text: "text-[#D97706]", bg: "bg-[#FFFBEB]", border: "border-[#FDE68A]" };
+  }
+  return { text: "text-[#DC2626]", bg: "bg-[#FEF2F2]", border: "border-[#FECACA]" };
 }
 
 // Kartu ringkasan status -- warna & ikon mengikuti konvensi yang sama dengan
@@ -144,45 +140,21 @@ export default async function CekKehadiranPage({
           Kembali ke Pencarian
         </Button>
 
-        {/* Profil siswa -- avatar inisial + chip identitas, menggantikan
-            heading polos supaya halaman terasa seperti "kartu identitas
-            digital" (selaras dengan tema kartu siswa di UI_RULES §25). */}
-        <div className="overflow-hidden rounded-[18px] border border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-          <div className="h-14 bg-gradient-to-r from-[#17586F] to-[#1C7F88]" />
-          <div className="flex flex-col gap-4 px-5 pb-5 sm:flex-row sm:items-end sm:justify-between">
-            <div className="-mt-8 flex items-end gap-4">
-              <div className="flex size-16 shrink-0 items-center justify-center rounded-full border-4 border-white bg-[#EAF7F8] text-[19px] font-bold text-[#17586F] shadow-sm">
-                {initials(detail.student.name)}
-              </div>
-              <div className="min-w-0 pb-1">
-                <h1 className="truncate text-[22px] font-bold tracking-tight text-[#17313A] sm:text-[26px]">
-                  {detail.student.name}
-                </h1>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
-                    NIS {detail.student.nis}
-                  </span>
-                  <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
-                    NISN {detail.student.nisn}
-                  </span>
-                  <span className="rounded-full bg-[#EAF7F8] px-2.5 py-1 text-[11px] font-medium text-[#17586F]">
-                    {detail.student.className}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className={`flex shrink-0 items-center gap-2 rounded-[12px] px-3 py-2 ${pctTone.bg}`}>
-              <TrendingUp className={`size-4 ${pctTone.text}`} strokeWidth={2.5} />
-              <div>
-                <p className={`text-lg font-bold leading-none ${pctTone.text}`}>
-                  {detail.summary.persentaseKehadiran}%
-                </p>
-                <p className="mt-0.5 text-[11px] text-[#71858C]">{detail.period.label}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Profil siswa -- avatar DiceBear + chip identitas, dibuat senada
+            dengan kartu siswa fisik (components/kartu-siswa/student-id-card)
+            supaya halaman ini terasa seperti "kartu identitas digital".
+            Nama tidak pernah dipotong; kotak QR/barcode pada kartu fisik
+            digantikan kotak persentase kehadiran periode berjalan. */}
+        <PublicStudentProfileCard
+          name={detail.student.name}
+          nis={detail.student.nis}
+          nisn={detail.student.nisn}
+          className={detail.student.className}
+          major={student.class?.major ?? null}
+          attendancePct={detail.summary.persentaseKehadiran}
+          periodLabel={detail.period.label}
+          pctTone={pctTone}
+        />
 
         {/* Filter bulan -- read-only, hanya untuk memilih periode yang
             ditampilkan (bukan aksi yang mengubah data). */}
