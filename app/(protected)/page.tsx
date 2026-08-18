@@ -4,12 +4,19 @@ import {
   AttendanceService,
   getTodayDateOnly,
 } from "@/lib/services/attendance-service";
-import { getAttendanceTrend } from "@/lib/services/report-service";
+import {
+  getAttendanceTrend,
+  getClassAttendanceTrend,
+  getDisciplineMonthOptions,
+  getTopDisciplinedStudents,
+} from "@/lib/services/report-service";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { RecentAttendance } from "@/components/dashboard/recent-attendance";
 import { ClassStats } from "@/components/dashboard/class-stats"; // ✅ benar
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { AttendanceTrendChart } from "@/components/dashboard/attendance-trend-chart";
+import { ClassComparisonTrendChart } from "@/components/dashboard/class-comparison-trend-chart";
+import { DisciplineLeaderboard } from "@/components/dashboard/discipline-leaderboard";
 import { Users, CheckCircle2, Clock, UserX } from "lucide-react";
 
 const TIMEZONE = "Asia/Jakarta";
@@ -40,13 +47,24 @@ export default async function DashboardPage() {
     classId = owned?.id;
   }
 
-  const [recap, classBreakdown, recentActivity, dailyTrend, monthlyTrend] =
+  // Bulan yang tersedia di dropdown leaderboard kedisiplinan: bulan berjalan
+  // + 5 bulan ke belakang (Agustus, Juli, ..., dst -- lihat
+  // getDisciplineMonthOptions di report-service.ts).
+  const disciplineMonths = getDisciplineMonthOptions();
+
+  const [recap, classBreakdown, recentActivity, dailyTrend, monthlyTrend, classTrend, disciplineLeaderboards] =
     await Promise.all([
       AttendanceService.getDailyRecap({ date: today, classId }),
       AttendanceService.getClassBreakdown({ date: today, classId }),
       AttendanceService.getRecentActivity({ date: today, classId, limit: 8 }),
       getAttendanceTrend({ mode: "daily", classId }),
       getAttendanceTrend({ mode: "monthly", classId }),
+      getClassAttendanceTrend({ classId }),
+      Promise.all(
+        disciplineMonths.map((m) =>
+          getTopDisciplinedStudents({ month: m.value, classId, limit: 5 })
+        )
+      ),
     ]);
 
   const hadirTotal = recap.counts.HADIR + recap.counts.TERLAMBAT;
@@ -66,13 +84,24 @@ export default async function DashboardPage() {
           </h1>
         </div>
       </div>
-
+      <QuickActions role={user.role} />
       {/* Grafik tren kehadiran — diletakkan di atas shortcut Absensi/Laporan/
           Daftar Siswa sesuai permintaan; toggle Harian/Bulanan tidak butuh
           request tambahan karena kedua dataset sudah di-fetch sekaligus. */}
       <AttendanceTrendChart dailyPoints={dailyTrend.points} monthlyPoints={monthlyTrend.points} />
 
-      <QuickActions role={user.role} />
+      {/* Baris kedua: kiri = perbandingan kehadiran antar kelas (Line Chart),
+          kanan = Top 5 Murid Paling Disiplin (bulanan). */}
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <ClassComparisonTrendChart data={classTrend} />
+        </div>
+        <div className="lg:col-span-2">
+          <DisciplineLeaderboard leaderboards={disciplineLeaderboards} />
+        </div>
+      </div>
+
+
 
       {/* Statistic cards — UI_RULES §15, spacing kelipatan 4px */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
