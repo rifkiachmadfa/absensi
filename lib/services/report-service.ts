@@ -82,6 +82,72 @@ export type StudentReportDetail = {
   log: StudentAttendanceLogEntry[]; // hanya hari sekolah (Senin-Jumat), terbaru dulu
 };
 
+// Dipakai oleh grafik tren kehadiran di dashboard (Bar Chart harian/bulanan,
+// dengan tab status: Hadir / Sakit / Izin / Alpha).
+export type TrendMode = "daily" | "monthly";
+export type TrendStatus = "HADIR" | "SAKIT" | "IZIN" | "ALPHA";
+
+export type AttendanceTrendPoint = {
+  key: string; // ISO date (daily) atau "YYYY-MM" (monthly)
+  label: string; // label singkat sumbu-X, mis. "12 Ags" atau "Ags 2026"
+  totalSiswa: number;
+  hadir: number; // HADIR + TERLAMBAT (tetap dihitung sebagai "masuk sekolah")
+  terlambat: number;
+  sakit: number;
+  izin: number;
+  alpha: number;
+  persentaseHadir: number;
+  persentaseSakit: number;
+  persentaseIzin: number;
+  persentaseAlpha: number;
+};
+
+export type AttendanceTrendPayload = {
+  mode: TrendMode;
+  points: AttendanceTrendPoint[];
+};
+
+// Dipakai oleh Line Chart perbandingan kehadiran antar kelas di dashboard.
+export type ClassTrendPoint = {
+  key: string;
+  label: string;
+  persentaseHadir: number;
+};
+
+export type ClassTrendSeries = {
+  classId: string;
+  className: string;
+  totalSiswa: number;
+  points: ClassTrendPoint[];
+};
+
+export type ClassAttendanceTrendPayload = {
+  labels: string[]; // sumbu-X, sama untuk semua kelas
+  series: ClassTrendSeries[];
+};
+
+// Dipakai oleh kartu "Top 5 Murid Paling Disiplin" di dashboard.
+// Penilaian PER BULAN (bukan harian): (1) jumlah hari masuk sekolah
+// (HADIR + TERLAMBAT) pada bulan tsb -- makin banyak makin disiplin,
+// (2) jika jumlahnya sama, rata-rata jam check-in yang PALING PAGI menang.
+export type DisciplineRow = {
+  studentId: string;
+  name: string;
+  nis: string;
+  className: string;
+  hadirCount: number; // jumlah hari HADIR/TERLAMBAT (masuk sekolah) bulan ini
+  avgCheckInLabel: string; // rata-rata jam check-in, format "HH:mm" (Asia/Jakarta)
+};
+
+export type DisciplineLeaderboardPayload = {
+  month: string; // "YYYY-MM"
+  monthLabel: string; // "Agustus 2026"
+  schoolDays: number; // total hari sekolah (Senin-Jumat) pada bulan ini yang SUDAH LEWAT
+  rows: DisciplineRow[]; // sudah diurutkan & dipotong ke `limit` (default 5)
+};
+
+export type MonthOption = { value: string; label: string };
+
 // ============================================================
 // Helpers -- semua tanggal di sini adalah "date-only" (midnight UTC yang
 // merepresentasikan tanggal kalender Asia/Jakarta), konsisten dengan
@@ -436,10 +502,369 @@ export async function getStudentAttendanceDetail(
   };
 }
 
+// ============================================================
+// Tren persentase kehadiran keseluruhan siswa -- dipakai oleh Bar Chart
+// di dashboard (§ Development Rules: satu sumber logic, reuse helper
+// tanggal/tally yang sudah ada di file ini, tidak membuat service baru).
+//
+// daily   -> 14 hari sekolah (Senin-Jumat) terakhir, satu batang = satu hari
+// monthly -> 6 bulan kalender terakhir, satu batang = satu bulan
+// ============================================================
+
+const SHORT_MONTH_LABEL = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Ags", "Sep", "Okt", "Nov", "Des",
+];
+
+const DAILY_TREND_POINTS = 14;
+const MONTHLY_TREND_POINTS = 6;
+
+// Helper bersama untuk daily & monthly: hitung 4 kategori persentase
+// (Hadir/Sakit/Izin/Alpha) dari satu set counts + satu denom, supaya
+// logic tidak diduplikasi antara dua mode.
+function buildTrendCounts(
+  counts: Omit<StatusCounts, "belumAbsen">,
+  denom: number
+): Pick<
+  AttendanceTrendPoint,
+  "hadir" | "terlambat" | "sakit" | "izin" | "alpha" | "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha"
+> {
+  const hadirTotal = counts.hadir + counts.terlambat;
+  const pct = (n: number) => (denom > 0 ? Math.round((n / denom) * 100) : 0);
+  return {
+    hadir: counts.hadir,
+    terlambat: counts.terlambat,
+    sakit: counts.sakit,
+    izin: counts.izin,
+    alpha: counts.alpha,
+    persentaseHadir: pct(hadirTotal),
+    persentaseSakit: pct(counts.sakit),
+    persentaseIzin: pct(counts.izin),
+    persentaseAlpha: pct(counts.alpha),
+  };
+}
+
+export async function getAttendanceTrend(params: {
+  mode: TrendMode;
+  classId?: string;
+}): Promise<AttendanceTrendPayload> {
+  const { mode, classId } = params;
+  const today = getTodayDateOnly();
+
+  const students = await prisma.student.findMany({
+    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
+    select: { id: true },
+  });
+  const totalSiswa = students.length;
+  const studentIds = students.map((s) => s.id);
+
+  if (totalSiswa === 0) {
+    return { mode, points: [] };
+  }
+
+  if (mode === "daily") {
+    // Kumpulkan N hari sekolah terakhir (mundur dari hari ini).
+    const schoolDates: Date[] = [];
+    const cursor = new Date(today);
+    while (schoolDates.length < DAILY_TREND_POINTS) {
+      if (!isWeekendDate(cursor)) schoolDates.unshift(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    const rangeStart = schoolDates[0];
+    const rangeEnd = schoolDates[schoolDates.length - 1];
+
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        date: { gte: rangeStart, lte: rangeEnd },
+        studentId: { in: studentIds },
+      },
+      select: { date: true, status: true },
+    });
+
+    const byDate = new Map<string, AttendanceStatus[]>();
+    for (const a of attendances) {
+      const key = toISODateOnly(a.date);
+      const list = byDate.get(key);
+      if (list) list.push(a.status);
+      else byDate.set(key, [a.status]);
+    }
+
+    const points: AttendanceTrendPoint[] = schoolDates.map((d) => {
+      const key = toISODateOnly(d);
+      const counts = tallyStatuses(byDate.get(key) ?? []);
+      return {
+        key,
+        label: new Intl.DateTimeFormat("id-ID", {
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        }).format(d),
+        totalSiswa,
+        ...buildTrendCounts(counts, totalSiswa),
+      };
+    });
+
+    return { mode, points };
+  }
+
+  // mode === "monthly"
+  const monthStarts: Date[] = [];
+  for (let i = MONTHLY_TREND_POINTS - 1; i >= 0; i--) {
+    monthStarts.push(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i, 1)));
+  }
+
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      date: { gte: monthStarts[0], lte: today },
+      studentId: { in: studentIds },
+    },
+    select: { date: true, status: true },
+  });
+
+  const points: AttendanceTrendPoint[] = monthStarts.map((monthStart) => {
+    const monthEndRequested = new Date(
+      Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)
+    );
+    const monthEnd = monthEndRequested.getTime() > today.getTime() ? today : monthEndRequested;
+    const schoolDays = countSchoolDays(monthStart, monthEnd);
+
+    const inMonth = attendances.filter(
+      (a) => a.date.getTime() >= monthStart.getTime() && a.date.getTime() <= monthEnd.getTime()
+    );
+    const counts = tallyStatuses(inMonth.map((a) => a.status));
+    const denom = totalSiswa * schoolDays;
+
+    return {
+      key: `${monthStart.getUTCFullYear()}-${String(monthStart.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: `${SHORT_MONTH_LABEL[monthStart.getUTCMonth()]} ${monthStart.getUTCFullYear()}`,
+      totalSiswa,
+      ...buildTrendCounts(counts, denom),
+    };
+  });
+
+  return { mode, points };
+}
+
 export async function getReportClassOptions() {
   return prisma.class.findMany({
     where: { status: ClassStatus.ACTIVE },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
+}
+
+// ============================================================
+// Tren kehadiran per kelas (14 hari sekolah terakhir) -- dipakai oleh
+// Line Chart perbandingan kelas di dashboard. Satu query attendance untuk
+// SEMUA kelas sekaligus (bukan N+1), lalu di-group manual per classId+date.
+// Jika `classId` diberikan (mis. role WALI_KELAS), hanya kelas tsb yang
+// dikembalikan.
+// ============================================================
+
+export async function getClassAttendanceTrend(params?: {
+  classId?: string;
+}): Promise<ClassAttendanceTrendPayload> {
+  const classId = params?.classId;
+  const today = getTodayDateOnly();
+
+  const classes = await prisma.class.findMany({
+    where: {
+      status: ClassStatus.ACTIVE,
+      ...(classId ? { id: classId } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      students: { where: { status: StudentStatus.ACTIVE }, select: { id: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  const classesWithStudents = classes.filter((k) => k.students.length > 0);
+  if (classesWithStudents.length === 0) {
+    return { labels: [], series: [] };
+  }
+
+  // 14 hari sekolah terakhir -- sama persis dengan getAttendanceTrend(daily)
+  // supaya kedua chart di dashboard selalu merujuk periode yang sama.
+  const schoolDates: Date[] = [];
+  const cursor = new Date(today);
+  while (schoolDates.length < DAILY_TREND_POINTS) {
+    if (!isWeekendDate(cursor)) schoolDates.unshift(new Date(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  const rangeStart = schoolDates[0];
+  const rangeEnd = schoolDates[schoolDates.length - 1];
+  const dateKeys = schoolDates.map(toISODateOnly);
+  const labels = schoolDates.map((d) =>
+    new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", timeZone: "UTC" }).format(d)
+  );
+
+  const studentToClass = new Map<string, string>();
+  const allStudentIds: string[] = [];
+  for (const k of classesWithStudents) {
+    for (const s of k.students) {
+      studentToClass.set(s.id, k.id);
+      allStudentIds.push(s.id);
+    }
+  }
+
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      date: { gte: rangeStart, lte: rangeEnd },
+      studentId: { in: allStudentIds },
+    },
+    select: { date: true, status: true, studentId: true },
+  });
+
+  const byClassDate = new Map<string, AttendanceStatus[]>();
+  for (const a of attendances) {
+    const cId = studentToClass.get(a.studentId);
+    if (!cId) continue;
+    const key = `${cId}|${toISODateOnly(a.date)}`;
+    const list = byClassDate.get(key);
+    if (list) list.push(a.status);
+    else byClassDate.set(key, [a.status]);
+  }
+
+  const series: ClassTrendSeries[] = classesWithStudents.map((k) => {
+    const totalSiswa = k.students.length;
+    const points: ClassTrendPoint[] = dateKeys.map((iso, i) => {
+      const statuses = byClassDate.get(`${k.id}|${iso}`) ?? [];
+      const counts = tallyStatuses(statuses);
+      const hadirTotal = counts.hadir + counts.terlambat;
+      const persentaseHadir =
+        totalSiswa > 0 ? Math.round((hadirTotal / totalSiswa) * 100) : 0;
+      return { key: iso, label: labels[i], persentaseHadir };
+    });
+    return { classId: k.id, className: k.name, totalSiswa, points };
+  });
+
+  return { labels, series };
+}
+
+// ============================================================
+// Leaderboard "Top 5 Murid Paling Disiplin" -- PENILAIAN PER BULAN, bukan
+// harian (Agustus, September, Oktober, dst -- reuse countSchoolDays/
+// isWeekendDate yang sudah ada, TIDAK membuat helper hari-sekolah baru).
+//
+// Urutan peringkat:
+//   1. Jumlah hari masuk sekolah (HADIR + TERLAMBAT) bulan tsb -- DESC
+//   2. Rata-rata jam check-in (Asia/Jakarta) -- ASC (paling pagi menang)
+// Siswa tanpa kehadiran sama sekali pada bulan itu tidak masuk peringkat.
+// ============================================================
+
+const DISCIPLINE_MONTH_OPTIONS_COUNT = 6;
+
+// Jam check-in disimpan sebagai timestamp UTC di DB, tapi "jam" yang
+// relevan untuk kedisiplinan adalah jam dinding Asia/Jakarta (sama seperti
+// formatTime() di recent-attendance.tsx) -- bukan jam UTC mentah.
+function jakartaSecondsOfDay(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return get("hour") * 3600 + get("minute") * 60 + get("second");
+}
+
+function secondsOfDayToLabel(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600) % 24;
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Daftar bulan yang bisa dipilih di dashboard: bulan berjalan + N bulan ke
+// belakang (default 6), label pakai nama bulan Indonesia (Agustus 2026, dst).
+export function getDisciplineMonthOptions(
+  count: number = DISCIPLINE_MONTH_OPTIONS_COUNT
+): MonthOption[] {
+  const today = getTodayDateOnly();
+  const options: MonthOption[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i, 1));
+    const value = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    options.push({ value, label: formatPeriodLabel("monthly", d) });
+  }
+  return options; // index 0 = bulan berjalan, mundur ke belakang setelahnya
+}
+
+export async function getTopDisciplinedStudents(params: {
+  month: string; // "YYYY-MM"
+  classId?: string;
+  limit?: number;
+}): Promise<DisciplineLeaderboardPayload> {
+  const { month, classId } = params;
+  const limit = params.limit ?? 5;
+
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
+  const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
+  const today = getTodayDateOnly();
+  const monthLabel = formatPeriodLabel("monthly", periodStart);
+
+  // Bulan yang diminta sepenuhnya di masa depan -- belum mungkin ada data.
+  if (periodStart.getTime() > today.getTime()) {
+    return { month, monthLabel, schoolDays: 0, rows: [] };
+  }
+
+  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
+  const schoolDays = countSchoolDays(periodStart, periodEnd);
+
+  const students = await prisma.student.findMany({
+    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
+    select: { id: true, name: true, nis: true, class: { select: { name: true } } },
+  });
+  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
+
+  const studentIds = students.map((s) => s.id);
+
+  // Hanya HADIR/TERLAMBAT yang dihitung sebagai "masuk sekolah" -- SAKIT,
+  // IZIN, DISPENSASI, ALPHA tidak menambah skor kedisiplinan (Section 10-11).
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      studentId: { in: studentIds },
+      date: { gte: periodStart, lte: periodEnd },
+      status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT] },
+    },
+    select: { studentId: true, checkInAt: true },
+  });
+
+  const byStudent = new Map<string, { count: number; secondsSum: number }>();
+  for (const a of attendances) {
+    const entry = byStudent.get(a.studentId) ?? { count: 0, secondsSum: 0 };
+    entry.count += 1;
+    entry.secondsSum += jakartaSecondsOfDay(a.checkInAt);
+    byStudent.set(a.studentId, entry);
+  }
+
+  const rows = students
+    .map((s) => {
+      const entry = byStudent.get(s.id);
+      const hadirCount = entry?.count ?? 0;
+      const avgSeconds = entry && entry.count > 0 ? entry.secondsSum / entry.count : null;
+      return {
+        studentId: s.id,
+        name: s.name,
+        nis: s.nis,
+        className: s.class.name,
+        hadirCount,
+        avgCheckInLabel: avgSeconds === null ? "-" : secondsOfDayToLabel(avgSeconds),
+        sortSeconds: avgSeconds ?? Number.MAX_SAFE_INTEGER,
+      };
+    })
+    .filter((r) => r.hadirCount > 0) // siswa tanpa kehadiran bulan ini tidak masuk peringkat
+    .sort((a, b) => {
+      if (b.hadirCount !== a.hadirCount) return b.hadirCount - a.hadirCount; // (1) jumlah hadir DESC
+      return a.sortSeconds - b.sortSeconds; // (2) rata-rata jam check-in ASC
+    })
+    .slice(0, limit)
+    .map(({ sortSeconds: _sortSeconds, ...row }): DisciplineRow => row);
+
+  return { month, monthLabel, schoolDays, rows };
 }

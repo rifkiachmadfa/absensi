@@ -1,7 +1,10 @@
 // lib/types/attendance.ts
 
-// Hasil konfirmasi kehadiran (POST /api/absensi/confirm) -- absensi SUDAH
-// tersimpan dengan status yang dipilih manual oleh guru/petugas.
+// Hasil check-in (POST /api/absensi/scan atau /api/absensi/manual) -- kedua
+// endpoint langsung mengidentifikasi SEKALIGUS menyimpan absensi dalam satu
+// langkah, status (HADIR/TERLAMBAT) dihitung otomatis dari AttendanceSchedule
+// oleh AttendanceService.checkIn(). Guru/petugas tidak lagi memilih status
+// secara manual sesudah scan/pencarian (lihat catatan di attendance-service.ts).
 export type AttendanceCheckInResponse =
   | {
       type: "SUCCESS";
@@ -17,35 +20,6 @@ export type AttendanceCheckInResponse =
     }
   | { type: "STUDENT_INACTIVE"; student: { name: string } }
   | { type: "STUDENT_NOT_FOUND"; message?: string };
-
-// Hasil identifikasi siswa (POST /api/absensi/scan atau /api/absensi/manual)
-// -- BELUM ada absensi yang tersimpan. `suggestedStatus` hanya saran untuk
-// di-highlight di UI, guru/petugas tetap memilih status final secara manual.
-export type AttendanceIdentifyResponse =
-  | {
-      type: "SUCCESS";
-      student: { id: string; name: string; nisn: string; className: string };
-      suggestedStatus: string;
-    }
-  | {
-      type: "ALREADY_CHECKED_IN";
-      student: { name: string; className: string };
-      time: string;
-      status: string;
-    }
-  | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string };
-
-// State lokal di ScanDialog: siswa yang sudah diidentifikasi dan sedang
-// menunggu petugas memilih status kehadirannya.
-export type PendingStudent = {
-  id: string;
-  name: string;
-  nisn: string;
-  className: string;
-  suggestedStatus: string;
-  method: "QR" | "MANUAL";
-};
 
 export type AttendanceTableRow = {
   studentId: string;

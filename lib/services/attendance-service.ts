@@ -21,10 +21,11 @@ export type CheckInResult =
   | { type: "STUDENT_NOT_FOUND" }
   | { type: "STUDENT_INACTIVE"; student: StudentSummary };
 
-// Hasil dari AttendanceService.identify (Phase 7): HANYA mengidentifikasi siswa
-// dari QR/pencarian manual, TIDAK membuat record absensi apapun.
-// `suggestedStatus` adalah SARAN berdasarkan AttendanceSchedule/SchoolSetting,
-// keputusan akhir tetap ada di tangan guru/petugas lewat confirmAttendance.
+// Hasil dari AttendanceService.identify (Phase 7, LEGACY -- tidak lagi dipakai
+// oleh /api/absensi/scan & /api/absensi/manual sejak checkIn() ada, lihat
+// catatan di atas method identify()). HANYA mengidentifikasi siswa dari
+// QR/pencarian manual, TIDAK membuat record absensi apapun. `suggestedStatus`
+// adalah SARAN berdasarkan AttendanceSchedule/SchoolSetting.
 export type IdentifyResult =
   | { type: "SUCCESS"; student: StudentSummary; suggestedStatus: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
@@ -137,19 +138,26 @@ function toSummary(student: {
 // ============================================================
 // AttendanceService
 // Satu-satunya pintu masuk logic absensi. Dipakai oleh:
-// - QR Scan (Phase 7)      -> identify()          (identifikasi saja)
-// - Input manual (Phase 7) -> identify()          (identifikasi saja)
-// - Konfirmasi kehadiran   -> confirmAttendance()  (Phase 8, status DIPILIH
-//   MANUAL oleh guru/petugas yang scan/mencari siswa -- BUKAN otomatis oleh
-//   sistem, karena jam masuk sekolah bisa berbeda-beda setiap hari)
-// - Perubahan status oleh admin/wali kelas (Phase 8) -> setManualStatus()
-//   (koreksi status yang SUDAH tercatat, dari tabel /absensi)
+// - QR Scan            -> checkIn(method: QR)      (identifikasi + simpan,
+//   status dihitung OTOMATIS dari AttendanceSchedule/SchoolSetting)
+// - Input manual        -> checkIn(method: MANUAL)  (sama persis dengan QR,
+//   satu-satunya bedanya identifier-nya studentId hasil pencarian, bukan qrToken)
+// - Perubahan status oleh admin/wali kelas -> setManualStatus()
+//   (koreksi status yang SUDAH tercatat, atau set SAKIT/IZIN/DISPENSASI/ALPHA
+//   untuk siswa yang masih BELUM_ABSEN, dari tabel /absensi)
+// - Auto-ALPHA batas akhir absensi -> markUnrecordedAsAlpha()
+//   (dipanggil oleh cron job harian, Section 11: siswa yang sampai batas
+//   waktu tertentu belum absen otomatis diberi status ALPHA)
 // - Rekap harian, statistik per kelas & aktivitas terbaru untuk
 //   dashboard (Phase 9) dan laporan (Phase 10)
 //
-// Flow scan/manual sekarang 2 langkah (bukan auto-create langsung):
-//   1. identify(identifier, method)        -> kenali siswa, TIDAK menyimpan apa pun
-//   2. confirmAttendance(studentId, status) -> baru menyimpan, status pilihan guru
+// checkIn() adalah SATU LANGKAH: identifikasi siswa, hitung status dari
+// AttendanceSchedule (hari ini) -- fallback ke SchoolSetting kalau tidak ada
+// jadwal aktif untuk hari tsb -- lalu langsung simpan. Ini SENGAJA berbeda
+// dari identify()+confirmAttendance() (masih ada di bawah, LEGACY, tidak lagi
+// dipanggil oleh route manapun) yang mewajibkan guru memilih status secara
+// manual lewat tombol. Guru/petugas TETAP bisa mengoreksi status yang salah
+// sesudahnya lewat setManualStatus() (StatusDropdown di tabel /absensi).
 //
 // Jangan buat logic absensi terpisah di luar service ini.
 // ============================================================
@@ -213,6 +221,10 @@ export class AttendanceService {
     return rows;
   }
   /**
+   * LEGACY -- tidak lagi dipanggil oleh route manapun sejak checkIn() ada
+   * (lihat checkIn() di bawah). Disimpan sebagai opsi kalau suatu saat
+   * dibutuhkan alur "identifikasi dulu, baru pilih status manual" lagi.
+   *
    * Langkah 1: identifikasi siswa dari QR Scan atau input manual.
    * TIDAK menyimpan record absensi apapun -- hanya mengenali siswa dan
    * memberi tahu UI apakah siswa tsb sudah absen hari ini.
@@ -259,6 +271,119 @@ export class AttendanceService {
   }
 
   /**
+   * Identifikasi siswa dari QR Scan atau input manual, DAN langsung simpan
+   * absensinya dalam satu langkah -- status (HADIR/TERLAMBAT) dihitung
+   * OTOMATIS dari AttendanceSchedule (jadwal hari ini) / SchoolSetting,
+   * konsisten dengan Section 3.1 (server sebagai sumber waktu) & Section 11
+   * (aturan jam absensi) pada spesifikasi project.
+   *
+   * Dipakai oleh QR Scan (Phase 7) maupun input manual (Phase 7) -- SATU
+   * service yang sama untuk keduanya (Section 9), hanya `identifier` dan
+   * `method` yang berbeda.
+   *
+   * TIDAK PERNAH menghasilkan SAKIT/IZIN/DISPENSASI/ALPHA -- status itu
+   * hanya bisa di-set lewat setManualStatus() oleh admin/wali kelas, karena
+   * checkIn() berarti siswa TERBUKTI hadir secara fisik (baru saja di-scan /
+   * ditemukan & dipilih oleh petugas).
+   */
+  static async checkIn(params: {
+    identifier: string; // qrToken (QR) atau studentId (MANUAL)
+    method: AttendanceMethod;
+    recordedById: string;
+  }): Promise<CheckInResult> {
+    const { identifier, method, recordedById } = params;
+
+    const student = await prisma.student.findFirst({
+      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+      include: { class: true },
+    });
+
+    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (student.status !== StudentStatus.ACTIVE) {
+      return { type: "STUDENT_INACTIVE", student: toSummary(student) };
+    }
+
+    const date = getTodayDateOnly();
+    const existing = await prisma.attendance.findUnique({
+      where: { studentId_date: { studentId: student.id, date } },
+    });
+
+    if (existing) {
+      return {
+        type: "ALREADY_CHECKED_IN",
+        student: toSummary(student),
+        time: existing.checkInAt.toISOString(),
+        status: existing.status,
+      };
+    }
+
+    // Waktu & status SELALU dihitung dari server (Section 3.1), tidak pernah
+    // dipercayakan ke client, dan diambil di sini -- sedekat mungkin dengan
+    // penyimpanan -- supaya jam yang dipakai untuk menentukan status sama
+    // persis dengan jam yang tersimpan sebagai checkInAt.
+    const { serverTime, dayOfWeek, hhmm } = getJakartaNow();
+    const status = await resolveStatus(dayOfWeek, hhmm);
+
+    try {
+      const attendance = await prisma.$transaction(async (tx) => {
+        const created = await tx.attendance.create({
+          data: {
+            studentId: student.id,
+            date,
+            checkInAt: serverTime,
+            status,
+            method,
+            recordedById,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: recordedById,
+            action:
+              method === AttendanceMethod.QR
+                ? AuditAction.ATTENDANCE_SCAN
+                : AuditAction.ATTENDANCE_MANUAL,
+            entity: "Attendance",
+            entityId: created.id,
+            description: `Absen ${student.name} (${student.class.name}) - ${status} (otomatis dari AttendanceSchedule)`,
+          },
+        });
+
+        return created;
+      });
+
+      return {
+        type: "SUCCESS",
+        student: toSummary(student),
+        time: attendance.checkInAt.toISOString(),
+        status: attendance.status,
+      };
+    } catch (err) {
+      // Unique constraint (studentId + date) -> race condition: siswa yang
+      // sama sempat di-scan guru lain / dua kali nyaris bersamaan saat burst
+      // request jam masuk sekolah (Section 38). Tangkap di sini, bukan crash.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const existingRace = await prisma.attendance.findUnique({
+          where: { studentId_date: { studentId: student.id, date } },
+        });
+        return {
+          type: "ALREADY_CHECKED_IN",
+          student: toSummary(student),
+          time: existingRace?.checkInAt.toISOString() ?? "",
+          status: existingRace?.status ?? status,
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * LEGACY -- tidak lagi dipanggil oleh route manapun sejak checkIn() ada.
+   * Disimpan (bukan dihapus) sebagai opsi kalau suatu saat dibutuhkan alur
+   * "pilih status manual sesudah scan" lagi. Jangan panggil dari kode baru;
+   * gunakan checkIn().
+   *
    * Langkah 2: konfirmasi kehadiran siswa yang sudah diidentifikasi.
    * Status (HADIR/TERLAMBAT/SAKIT/IZIN/DISPENSASI/ALPHA) DIPILIH MANUAL oleh
    * guru/petugas yang melakukan scan/pencarian -- sistem tidak lagi
@@ -427,6 +552,81 @@ export class AttendanceService {
       previousStatus: existing?.status ?? null,
       newStatus: result.status,
     };
+  }
+
+  /**
+   * Auto-ALPHA batas akhir absensi (Section 11): siswa aktif yang SAMPAI SAAT
+   * INI belum punya record absensi pada `date` otomatis diberi status ALPHA.
+   * Dipanggil oleh cron job harian (lihat /api/cron/auto-alpha), BUKAN oleh
+   * UI guru/admin secara langsung.
+   *
+   * PENTING: siswa yang tidak scan BUKAN otomatis ALPHA sejak awal hari --
+   * mereka tetap BELUM_ABSEN sampai method ini dijalankan setelah batas waktu
+   * terlewati (mis. jam 12:00). Sebelum itu, admin/wali kelas tetap bisa
+   * menandai siswa SAKIT/IZIN/DISPENSASI lewat setManualStatus() seperti biasa
+   * -- method ini hanya menyentuh siswa yang MASIH BELUM_ABSEN saat dipanggil.
+   *
+   * `recordedById`/`userId` sengaja null (bukan user manapun) supaya di
+   * laporan/audit log jelas terlihat ini perubahan OTOMATIS oleh sistem,
+   * bukan input seorang guru/admin.
+   */
+  static async markUnrecordedAsAlpha(params: {
+    date: Date;
+  }): Promise<{ marked: number; alreadyRecorded: number; totalActive: number }> {
+    const { date } = params;
+
+    const students = await prisma.student.findMany({
+      where: { status: StudentStatus.ACTIVE },
+      select: { id: true, name: true, class: { select: { name: true } } },
+    });
+    const studentIds = students.map((s) => s.id);
+
+    const existing = await prisma.attendance.findMany({
+      where: { date, studentId: { in: studentIds } },
+      select: { studentId: true },
+    });
+    const alreadyRecordedIds = new Set(existing.map((a) => a.studentId));
+
+    const toMark = students.filter((s) => !alreadyRecordedIds.has(s.id));
+    const serverTime = new Date();
+    let marked = 0;
+
+    for (const student of toMark) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          const created = await tx.attendance.create({
+            data: {
+              studentId: student.id,
+              date,
+              checkInAt: serverTime,
+              status: AttendanceStatus.ALPHA,
+              method: AttendanceMethod.MANUAL,
+              recordedById: null,
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              userId: null,
+              action: AuditAction.STATUS_CHANGE,
+              entity: "Attendance",
+              entityId: created.id,
+              description: `Set status ${student.name} (${student.class.name}): BELUM_ABSEN -> ALPHA (otomatis oleh sistem, batas absensi terlewati)`,
+            },
+          });
+        });
+        marked += 1;
+      } catch (err) {
+        // Race condition: siswa sempat discan tepat saat job auto-ALPHA
+        // berjalan -> lewati, jangan timpa record yang baru saja tersimpan.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { marked, alreadyRecorded: alreadyRecordedIds.size, totalActive: students.length };
   }
 
   /**

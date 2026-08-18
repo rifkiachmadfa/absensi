@@ -9,6 +9,16 @@ export function DashboardSkeleton() {
         <Skeleton className="h-7 w-56" />
       </div>
 
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-3 w-56" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-[240px] w-full sm:h-[280px]" />
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-2">
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-8 w-32" />
