@@ -12,7 +12,7 @@ export function Topbar({ user }: { user: SessionUser }) {
         <MobileNav role={user.role} />
 
         <Link
-          href="/"
+          href="/dashboard"
           className="flex min-w-0 items-center gap-2.5"
         >
           <div className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-[8px]">

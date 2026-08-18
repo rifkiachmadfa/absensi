@@ -31,7 +31,7 @@ export type NavItem = {
 // tertolak sesuai role meskipun menunya tidak tampil.
 export const NAV_ITEMS: NavItem[] = [
   {
-    href: "/",
+    href: "/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
     roles: ["SUPERADMIN", "ADMIN", "GURU", "WALI_KELAS"],

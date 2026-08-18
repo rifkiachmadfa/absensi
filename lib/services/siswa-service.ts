@@ -108,6 +108,40 @@ export async function getStudentsForCardPrint(params: { classId?: string }) {
   });
 }
 
+/**
+ * Pencarian siswa untuk halaman PUBLIK (root "/" & /cek-kehadiran) --
+ * dipakai oleh orang tua/umum TANPA login untuk menemukan anaknya.
+ *
+ * Sengaja HANYA mengembalikan id, nama, dan nama kelas -- TIDAK NIS/NISN
+ * ataupun data sensitif lain. Endpoint yang memanggil fungsi ini WAJIB
+ * rate-limited (lihat app/api/publik/cari-siswa).
+ *
+ * Hanya siswa berstatus ACTIVE yang muncul, dan query minimal 2 karakter
+ * supaya tidak dipakai untuk "membrowsing" seluruh data siswa.
+ */
+export async function searchStudentsPublic(query: string) {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  return prisma.student.findMany({
+    where: {
+      status: "ACTIVE",
+      OR: [
+        { name: { contains: trimmed, mode: "insensitive" as const } },
+        { nis: { contains: trimmed } },
+        { nisn: { contains: trimmed } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      class: { select: { name: true } },
+    },
+    orderBy: { name: "asc" },
+    take: 10,
+  });
+}
+
 export async function getClassOptions() {
   return prisma.class.findMany({
     select: { id: true, name: true, status: true },
