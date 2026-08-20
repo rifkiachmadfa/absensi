@@ -1,5 +1,6 @@
 // app/api/absensi/scan/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { scanAttendanceSchema } from "@/lib/validations/attendance";
@@ -36,6 +37,13 @@ export async function POST(req: NextRequest) {
       result.type === "SUCCESS" ? 201 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
       result.type === "STUDENT_INACTIVE" ? 409 : 200;
+
+    // Absensi baru langsung mengubah angka Hadir/Terlambat/Belum Absen di
+    // dashboard publik "/" -- invalidate cache-nya hanya ketika record baru
+    // benar-benar tersimpan.
+    if (result.type === "SUCCESS") {
+      revalidatePath("/");
+    }
 
     return NextResponse.json(result, { status: statusCode });
   } catch (err) {

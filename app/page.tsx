@@ -16,6 +16,16 @@ import { PublicStudentSearch } from "@/components/publik/public-student-search";
 import { PublicHeader } from "@/components/publik/public-header";
 import { Users, CheckCircle2, Clock, UserX } from "lucide-react";
 
+
+// Halaman ini mengklaim "real-time" (lihat copy di hero section), tapi tanpa
+// dynamic API (cookies/headers) Next.js akan men-static-render & meng-cache
+// halaman ini tanpa batas waktu. `revalidate` di sini adalah baseline ISR --
+// auto-refresh tiap 30 detik meski tidak ada revalidatePath("/") yang
+// dipanggil dari action manapun. Perubahan lewat action/API tetap langsung
+// terlihat karena masing-masing sudah memanggil revalidatePath("/").
+export const revalidate = 30;
+
+
 const TIMEZONE = "Asia/Jakarta";
 
 function formatIndonesianDate(date: Date) {

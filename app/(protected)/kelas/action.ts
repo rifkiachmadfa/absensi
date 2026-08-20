@@ -47,8 +47,8 @@ export async function createClassAction(
     console.error("createClassAction error:", error);
     return { error: "Terjadi kesalahan, silakan coba lagi." };
   }
-
   revalidatePath("/kelas");
+  revalidatePath("/");
   redirect(`/kelas/${created.id}`);
 }
 
@@ -76,6 +76,7 @@ export async function updateClassAction(
 
   revalidatePath("/kelas");
   revalidatePath(`/kelas/${id}`);
+  revalidatePath("/");
   redirect(`/kelas/${id}`);
 }
 
@@ -102,5 +103,6 @@ export async function setClassStatusAction(
 
   revalidatePath("/kelas");
   revalidatePath(`/kelas/${id}`);
+  revalidatePath("/");
   redirect(`/kelas/${id}`);
 }

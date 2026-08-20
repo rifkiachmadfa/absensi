@@ -61,8 +61,8 @@ export async function createStudentAction(
     console.error("createStudentAction error:", error);
     return { error: "Terjadi kesalahan, silakan coba lagi." };
   }
-
   revalidatePath("/siswa");
+  revalidatePath("/");
   redirect(`/siswa/${created.id}`);
 }
 
@@ -97,6 +97,7 @@ export async function updateStudentAction(
 
   revalidatePath("/siswa");
   revalidatePath(`/siswa/${id}`);
+  revalidatePath("/");
   redirect(`/siswa/${id}`);
 }
 
