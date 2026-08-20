@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { GENDER_LABEL } from "@/lib/constants/student";
 
 export default async function SiswaPage({
   searchParams,
@@ -152,6 +153,7 @@ export default async function SiswaPage({
               <TableHead>Nama</TableHead>
               <TableHead>NIS</TableHead>
               <TableHead>NISN</TableHead>
+              <TableHead>Jenis Kelamin</TableHead>
               <TableHead>Kelas</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Aksi</TableHead>
@@ -160,7 +162,7 @@ export default async function SiswaPage({
           <TableBody>
             {students.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Belum ada data siswa.
                 </TableCell>
               </TableRow>
@@ -174,6 +176,7 @@ export default async function SiswaPage({
                 </TableCell>
                 <TableCell>{siswa.nis}</TableCell>
                 <TableCell>{siswa.nisn ?? "-"}</TableCell>
+                <TableCell>{siswa.gender ? GENDER_LABEL[siswa.gender] : "-"}</TableCell>
                 <TableCell>{siswa.class.name}</TableCell>
                 <TableCell>
                   <Badge variant={siswa.status === "ACTIVE" ? "default" : "outline"}>

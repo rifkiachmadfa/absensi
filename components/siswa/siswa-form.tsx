@@ -17,6 +17,7 @@ import {
   updateStudentAction,
   type StudentFormState,
 } from "@/app/(protected)/siswa/action";
+import { GENDER_OPTIONS } from "@/lib/constants/student";
 
 type ClassOption = { id: string; name: string; status: "ACTIVE" | "INACTIVE" };
 
@@ -28,6 +29,7 @@ type SiswaFormProps = {
     nis: string;
     nisn: string | null;
     name: string;
+    gender?: "LAKI_LAKI" | "PEREMPUAN" | null;
     classId: string;
   };
 };
@@ -88,6 +90,25 @@ export function SiswaForm({
         />
         {state.fieldErrors?.name && (
           <p className="text-sm text-destructive">{state.fieldErrors.name[0]}</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="gender">Jenis Kelamin *</Label>
+        <Select name="gender" defaultValue={defaultValues?.gender ?? undefined}>
+          <SelectTrigger id="gender" className="w-full">
+            <SelectValue placeholder="Pilih jenis kelamin" />
+          </SelectTrigger>
+          <SelectContent>
+            {GENDER_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {state.fieldErrors?.gender && (
+          <p className="text-sm text-destructive">{state.fieldErrors.gender[0]}</p>
         )}
       </div>
 

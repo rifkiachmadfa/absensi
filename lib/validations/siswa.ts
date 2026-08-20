@@ -16,6 +16,9 @@ export const studentFormSchema = z.object({
     .trim()
     .min(3, "Nama minimal 3 karakter")
     .max(100, "Nama maksimal 100 karakter"),
+  gender: z.enum(["LAKI_LAKI", "PEREMPUAN"], {
+    message: "Jenis kelamin wajib dipilih",
+  }),
   classId: z.string().min(1, "Kelas wajib dipilih"),
 });
 

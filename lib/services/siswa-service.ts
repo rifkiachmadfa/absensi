@@ -204,6 +204,7 @@ export async function createStudent(data: StudentFormInput, actor: SessionUser) 
       nis: data.nis.trim(),
       nisn,
       name: data.name.trim(),
+      gender: data.gender,
       classId: data.classId,
       qrToken,
     },
@@ -260,6 +261,7 @@ export async function updateStudent(
       nis: data.nis.trim(),
       nisn,
       name: data.name.trim(),
+      gender: data.gender,
       classId: data.classId,
     },
   });

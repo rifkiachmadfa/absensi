@@ -7,6 +7,120 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id              String       @id
+  email           String       @unique
+  name            String
+  role            UserRole     @default(GURU)
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  attendances     Attendance[] @relation("RecordedBy")
+  auditLogs       AuditLog[]
+  homeroomClasses Class[]      @relation("HomeroomTeacher")
+}
+
+model AcademicYear {
+  id        String             @id @default(cuid())
+  name      String             @unique
+  status    AcademicYearStatus @default(INACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  classes   Class[]
+}
+
+model Class {
+  id                String       @id @default(cuid())
+  name              String
+  academicYearId    String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  homeroomTeacherId String?
+  level             String?
+  major             String?
+  status            ClassStatus  @default(ACTIVE)
+  academicYear      AcademicYear @relation(fields: [academicYearId], references: [id])
+  homeroomTeacher   User?        @relation("HomeroomTeacher", fields: [homeroomTeacherId], references: [id])
+  students          Student[]
+
+  @@unique([name, academicYearId])
+  @@index([academicYearId])
+  @@index([status])
+  @@index([homeroomTeacherId])
+}
+
+model Student {
+  id          String        @id @default(cuid())
+  nis         String        @unique
+  nisn        String?       @unique
+  name        String
+  qrToken     String        @unique
+  status      StudentStatus @default(ACTIVE)
+  classId     String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  gender      Gender?
+  attendances Attendance[]
+  class       Class         @relation(fields: [classId], references: [id])
+
+  @@index([classId])
+  @@index([name])
+}
+
+model Attendance {
+  id           String           @id @default(cuid())
+  studentId    String
+  date         DateTime
+  checkInAt    DateTime
+  status       AttendanceStatus
+  method       AttendanceMethod
+  recordedById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  recordedBy   User?            @relation("RecordedBy", fields: [recordedById], references: [id])
+  student      Student          @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, date])
+  @@index([date])
+  @@index([studentId])
+  @@index([recordedById])
+}
+
+model AttendanceSchedule {
+  id           String   @id @default(cuid())
+  dayOfWeek    Int      @unique
+  checkInStart String
+  lateAfter    String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  userId      String?
+  action      AuditAction
+  entity      String
+  entityId    String?
+  description String?
+  createdAt   DateTime    @default(now())
+  user        User?       @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model SchoolSetting {
+  id                 String   @id @default(cuid())
+  schoolName         String
+  timezone           String   @default("Asia/Jakarta")
+  defaultCheckInTime String   @default("07:00")
+  lateAfter          String   @default("07:15")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
 enum UserRole {
   SUPERADMIN
   ADMIN
@@ -17,6 +131,11 @@ enum UserRole {
 enum StudentStatus {
   ACTIVE
   INACTIVE
+}
+
+enum Gender {
+  LAKI_LAKI
+  PEREMPUAN
 }
 
 enum ClassStatus {
@@ -52,135 +171,4 @@ enum AuditAction {
   ATTENDANCE_SCAN
   ATTENDANCE_MANUAL
   STATUS_CHANGE
-}
-
-model User {
-  id       String   @id
-  email    String   @unique
-  name     String
-  role     UserRole @default(GURU)
-  isActive Boolean  @default(true)
-
-  attendances     Attendance[] @relation("RecordedBy")
-  auditLogs       AuditLog[]
-  homeroomClasses Class[]      @relation("HomeroomTeacher")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model AcademicYear {
-  id     String             @id @default(cuid())
-  name   String             @unique
-  status AcademicYearStatus @default(INACTIVE)
-
-  classes Class[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Class {
-  id                String      @id @default(cuid())
-  name              String
-  level             String?
-  major             String?
-  status            ClassStatus @default(ACTIVE)
-  academicYearId    String
-  homeroomTeacherId String?
-
-  academicYear    AcademicYear @relation(fields: [academicYearId], references: [id])
-  homeroomTeacher User?        @relation("HomeroomTeacher", fields: [homeroomTeacherId], references: [id])
-  students        Student[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([name, academicYearId])
-  @@index([academicYearId])
-  @@index([status])
-  @@index([homeroomTeacherId])
-}
-
-model Student {
-  id      String        @id @default(cuid())
-  nis     String        @unique
-  nisn    String?       @unique
-  name    String
-  qrToken String        @unique
-  status  StudentStatus @default(ACTIVE)
-
-  classId String
-  class   Class @relation(fields: [classId], references: [id])
-
-  attendances Attendance[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([classId])
-  @@index([name])
-}
-
-model Attendance {
-  id        String            @id @default(cuid())
-  studentId String
-  date      DateTime
-  checkInAt DateTime
-  status    AttendanceStatus
-  method    AttendanceMethod
-
-  recordedById String?
-  recordedBy   User? @relation("RecordedBy", fields: [recordedById], references: [id])
-
-  student Student @relation(fields: [studentId], references: [id])
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([studentId, date])
-  @@index([date])
-  @@index([studentId])
-  @@index([recordedById])
-}
-
-model AttendanceSchedule {
-  id           String  @id @default(cuid())
-  dayOfWeek    Int
-  checkInStart String
-  lateAfter    String
-  isActive     Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([dayOfWeek])
-}
-
-model AuditLog {
-  id          String      @id @default(cuid())
-  userId      String?
-  action      AuditAction
-  entity      String
-  entityId    String?
-  description String?
-
-  user User? @relation(fields: [userId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-}
-
-model SchoolSetting {
-  id                 String @id @default(cuid())
-  schoolName         String
-  timezone           String @default("Asia/Jakarta")
-  defaultCheckInTime String @default("07:00")
-  lateAfter          String @default("07:15")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }

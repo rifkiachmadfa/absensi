@@ -18,6 +18,7 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { setStudentStatusAction } from "@/app/(protected)/siswa/action";
+import { GENDER_LABEL } from "@/lib/constants/student";
 
 export default async function DetailSiswaPage({
   params,
@@ -52,7 +53,8 @@ export default async function DetailSiswaPage({
           </div>
           <p className="text-sm text-muted-foreground">
             NIS {siswa.nis}
-            {siswa.nisn ? ` • NISN ${siswa.nisn}` : ""} • {siswa.class.name}
+            {siswa.nisn ? ` • NISN ${siswa.nisn}` : ""}
+            {siswa.gender ? ` • ${GENDER_LABEL[siswa.gender]}` : ""} • {siswa.class.name}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             QR Token: <span className="font-mono">{siswa.qrToken}</span>
@@ -118,6 +120,7 @@ export default async function DetailSiswaPage({
               nis: siswa.nis,
               nisn: siswa.nisn,
               name: siswa.name,
+              gender: siswa.gender,
               classId: siswa.classId,
             }}
           />
@@ -137,6 +140,12 @@ export default async function DetailSiswaPage({
             <div>
               <dt className="text-xs text-muted-foreground">NISN</dt>
               <dd className="text-sm font-medium">{siswa.nisn ?? "-"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Jenis Kelamin</dt>
+              <dd className="text-sm font-medium">
+                {siswa.gender ? GENDER_LABEL[siswa.gender] : "-"}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Kelas</dt>

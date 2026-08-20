@@ -149,6 +149,7 @@ export default async function CekKehadiranPage({
           name={detail.student.name}
           nis={detail.student.nis}
           nisn={detail.student.nisn}
+          gender={detail.student.gender}
           className={detail.student.className}
           major={student.class?.major ?? null}
           attendancePct={detail.summary.persentaseKehadiran}

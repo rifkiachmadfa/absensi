@@ -28,6 +28,7 @@ function parseStudentForm(formData: FormData) {
     nis: formData.get("nis"),
     nisn: formData.get("nisn") ?? "",
     name: formData.get("name"),
+    gender: formData.get("gender"),
     classId: formData.get("classId"),
   });
 }

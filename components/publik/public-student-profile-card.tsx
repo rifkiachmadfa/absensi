@@ -5,7 +5,7 @@ import { useState } from "react";
 import { TrendingUp } from "lucide-react";
 import { getMajorTheme } from "@/lib/kartu-siswa/major-theme";
 import { getStudentAvatarUrl } from "@/lib/kartu-siswa/avatar";
-
+import { GENDER_LABEL } from "@/lib/constants/student";
 export type PctTone = {
   text: string;
   bg: string;
@@ -36,6 +36,7 @@ export function PublicStudentProfileCard({
   name,
   nis,
   nisn,
+  gender,
   className,
   major,
   attendancePct,
@@ -45,6 +46,7 @@ export function PublicStudentProfileCard({
   name: string;
   nis: string;
   nisn: string | null;
+  gender: "LAKI_LAKI" | "PEREMPUAN" | null;
   className: string;
   major: string | null;
   attendancePct: number;
@@ -109,12 +111,14 @@ export function PublicStudentProfileCard({
               {name}
             </h1>
             <div className="mt-1.5 flex flex-wrap justify-center gap-1.5 sm:justify-start">
-              <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
-                NIS {nis}
-              </span>
-              <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
+<span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
                 NISN {nisn ?? "-"}
               </span>
+              {gender && (
+                <span className="rounded-full bg-[#F1F5F5] px-2.5 py-1 text-[11px] font-medium text-[#48616A]">
+                  {GENDER_LABEL[gender]}
+                </span>
+              )}
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-medium"
                 style={{ backgroundColor: theme.badgeBg, color: theme.badgeText }}

@@ -76,12 +76,18 @@ export type StudentAttendanceLogEntry = {
 };
 
 export type StudentReportDetail = {
-  student: { id: string; name: string; nis: string; nisn: string; className: string };
+  student: {
+    id: string;
+    name: string;
+    nis: string;
+    nisn: string;
+    gender: "LAKI_LAKI" | "PEREMPUAN" | null;
+    className: string;
+  };
   period: ReportPeriod;
   summary: StatusCounts & { totalSchoolDays: number; persentaseKehadiran: number };
   log: StudentAttendanceLogEntry[]; // hanya hari sekolah (Senin-Jumat), terbaru dulu
 };
-
 // Dipakai oleh grafik tren kehadiran di dashboard (Bar Chart harian/bulanan,
 // dengan tab status: Hadir / Sakit / Izin / Alpha).
 export type TrendMode = "daily" | "monthly";
@@ -420,7 +426,14 @@ export async function getStudentAttendanceDetail(
 ): Promise<StudentReportDetail | null> {
   const student = await prisma.student.findUnique({
     where: { id: params.studentId },
-    select: { id: true, name: true, nis: true, nisn: true, class: { select: { name: true } } },
+    select: {
+      id: true,
+      name: true,
+      nis: true,
+      nisn: true,
+      gender: true,
+      class: { select: { name: true } },
+    },
   });
   if (!student) return null;
 
@@ -494,6 +507,7 @@ export async function getStudentAttendanceDetail(
       name: student.name,
       nis: student.nis,
       nisn: student.nisn ?? "-",
+      gender: student.gender,
       className: student.class.name,
     },
     period,
