@@ -21,6 +21,27 @@ export type AttendanceCheckInResponse =
   | { type: "STUDENT_INACTIVE"; student: { name: string } }
   | { type: "STUDENT_NOT_FOUND"; message?: string };
 
+// Hasil check-out (POST /api/absensi/scan-pulang atau /api/absensi/manual-pulang)
+// -- mengisi checkOutAt pada record Attendance hari itu yang SUDAH ADA
+// (AttendanceService.checkOut()). Siswa yang belum check-in hari itu akan
+// mendapat NOT_CHECKED_IN, bukan record baru.
+export type AttendanceCheckOutResponse =
+  | {
+      type: "SUCCESS";
+      student: { name: string; nisn: string; className: string };
+      time: string;
+      status: string;
+    }
+  | {
+      type: "ALREADY_CHECKED_OUT";
+      student: { name: string; className: string };
+      time: string;
+      status: string;
+    }
+  | { type: "NOT_CHECKED_IN"; student: { name: string; className: string } }
+  | { type: "STUDENT_INACTIVE"; student: { name: string } }
+  | { type: "STUDENT_NOT_FOUND"; message?: string };
+
 export type AttendanceTableRow = {
   studentId: string;
   attendanceId: string | null;

@@ -26,6 +26,17 @@ export type CheckInResult =
 // catatan di atas method identify()). HANYA mengidentifikasi siswa dari
 // QR/pencarian manual, TIDAK membuat record absensi apapun. `suggestedStatus`
 // adalah SARAN berdasarkan AttendanceSchedule/SchoolSetting.
+// Hasil dari AttendanceService.checkOut (fitur "Pulang"): siswa yang di-scan
+// HARUS sudah check-in (HADIR/TERLAMBAT) hari itu -- checkOut() TIDAK PERNAH
+// membuat record Attendance baru, hanya mengisi checkOutAt pada record yang
+// sudah ada. Sama seperti checkIn(), waktu SELALU dari server (Section 3.1).
+export type CheckOutResult =
+  | { type: "SUCCESS"; student: StudentSummary; time: string; status: AttendanceStatus }
+  | { type: "ALREADY_CHECKED_OUT"; student: StudentSummary; time: string; status: AttendanceStatus }
+  | { type: "NOT_CHECKED_IN"; student: StudentSummary }
+  | { type: "STUDENT_NOT_FOUND" }
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+
 export type IdentifyResult =
   | { type: "SUCCESS"; student: StudentSummary; suggestedStatus: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
@@ -85,6 +96,11 @@ type StudentSummary = {
 // Internal helpers
 // ============================================================
 
+// Dipakai internal oleh checkOut() untuk mendeteksi race condition (dua
+// request checkOut nyaris bersamaan untuk siswa yang sama) tanpa perlu
+// unique constraint tambahan di database -- lihat catatan di checkOut().
+class AlreadyCheckedOutError extends Error {}
+
 const TIMEZONE = "Asia/Jakarta";
 
 function getJakartaNow() {
@@ -142,6 +158,9 @@ function toSummary(student: {
 //   status dihitung OTOMATIS dari AttendanceSchedule/SchoolSetting)
 // - Input manual        -> checkIn(method: MANUAL)  (sama persis dengan QR,
 //   satu-satunya bedanya identifier-nya studentId hasil pencarian, bukan qrToken)
+// - Scan/Input manual "Pulang" -> checkOut(method: QR | MANUAL) (mengisi
+//   checkOutAt pada record Attendance yang sudah ada; siswa yang belum
+//   check-in hari itu akan mendapat NOT_CHECKED_IN, bukan record baru)
 // - Perubahan status oleh admin/wali kelas -> setManualStatus()
 //   (koreksi status yang SUDAH tercatat, atau set SAKIT/IZIN/DISPENSASI/ALPHA
 //   untuk siswa yang masih BELUM_ABSEN, dari tabel /absensi)
@@ -372,6 +391,108 @@ export class AttendanceService {
           student: toSummary(student),
           time: existingRace?.checkInAt.toISOString() ?? "",
           status: existingRace?.status ?? status,
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Fitur "Pulang": mencatat jam pulang siswa yang HARI INI sudah check-in
+   * (HADIR/TERLAMBAT). Dipanggil dari QR Scan (method: QR) maupun input
+   * manual (method: MANUAL) -- SATU service yang sama untuk keduanya,
+   * konsisten dengan Section 9 & pola checkIn() di atas.
+   *
+   * checkOut() TIDAK PERNAH membuat record Attendance baru: siswa yang belum
+   * check-in hari ini (BELUM_ABSEN) akan mendapat NOT_CHECKED_IN, bukan
+   * dianggap sudah pulang. Ini menjaga agar `status` (HADIR/TERLAMBAT/...)
+   * tetap murni ditentukan oleh checkIn()/setManualStatus() -- checkOut()
+   * hanya menambahkan `checkOutAt` pada record yang sudah ada.
+   *
+   * Waktu SELALU diambil dari server (Section 3.1), tidak pernah dari client.
+   */
+  static async checkOut(params: {
+    identifier: string; // qrToken (QR) atau studentId (MANUAL)
+    method: AttendanceMethod;
+    recordedById: string;
+  }): Promise<CheckOutResult> {
+    const { identifier, method, recordedById } = params;
+
+    const student = await prisma.student.findFirst({
+      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+      include: { class: true },
+    });
+
+    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (student.status !== StudentStatus.ACTIVE) {
+      return { type: "STUDENT_INACTIVE", student: toSummary(student) };
+    }
+
+    const date = getTodayDateOnly();
+    const existing = await prisma.attendance.findUnique({
+      where: { studentId_date: { studentId: student.id, date } },
+    });
+
+    // Siswa belum check-in hari ini -> tidak ada apa pun untuk "dipulangkan".
+    // checkOut() sengaja TIDAK membuat record baru (lihat catatan di atas).
+    if (!existing) {
+      return { type: "NOT_CHECKED_IN", student: toSummary(student) };
+    }
+
+    if (existing.checkOutAt) {
+      return {
+        type: "ALREADY_CHECKED_OUT",
+        student: toSummary(student),
+        time: existing.checkOutAt.toISOString(),
+        status: existing.status,
+      };
+    }
+
+    const { serverTime } = getJakartaNow();
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        // updateMany + where checkOutAt: null (bukan update biasa) supaya
+        // dua request checkOut yang nyaris bersamaan untuk siswa yang sama
+        // (mis. dua guru scan kartu yang sama) tidak menimpa satu sama lain
+        // atau membuat dua audit log untuk satu kejadian.
+        const updateResult = await tx.attendance.updateMany({
+          where: { id: existing.id, checkOutAt: null },
+          data: { checkOutAt: serverTime },
+        });
+
+        if (updateResult.count === 0) {
+          throw new AlreadyCheckedOutError();
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: recordedById,
+            action:
+              method === AttendanceMethod.QR
+                ? AuditAction.ATTENDANCE_SCAN
+                : AuditAction.ATTENDANCE_MANUAL,
+            entity: "Attendance",
+            entityId: existing.id,
+            description: `Absen pulang ${student.name} (${student.class.name})`,
+          },
+        });
+      });
+
+      return {
+        type: "SUCCESS",
+        student: toSummary(student),
+        time: serverTime.toISOString(),
+        status: existing.status,
+      };
+    } catch (err) {
+      if (err instanceof AlreadyCheckedOutError) {
+        const latest = await prisma.attendance.findUnique({ where: { id: existing.id } });
+        return {
+          type: "ALREADY_CHECKED_OUT",
+          student: toSummary(student),
+          time: latest?.checkOutAt?.toISOString() ?? "",
+          status: latest?.status ?? existing.status,
         };
       }
       throw err;

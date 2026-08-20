@@ -9,6 +9,8 @@ const TONE_CLASSES = {
   primary: { bar: "bg-[#22949E]", chip: "bg-[#EAF7F8] text-[#17586F]" },
   success: { bar: "bg-[#16A34A]", chip: "bg-[#F0FDF4] text-[#16A34A]" },
   warning: { bar: "bg-[#D97706]", chip: "bg-[#FFFBEB] text-[#D97706]" },
+  danger: { bar: "bg-[#DC2626]", chip: "bg-[#FEF2F2] text-[#DC2626]" },
+  info: { bar: "bg-[#2563EB]", chip: "bg-[#EFF6FF] text-[#2563EB]" },
   neutral: { bar: "bg-[#A5B2B6]", chip: "bg-[#F1F5F5] text-[#48616A]" },
 } as const;
 

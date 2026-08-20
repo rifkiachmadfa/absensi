@@ -14,7 +14,15 @@ import { PublicClassStats } from "@/components/publik/public-class-stats";
 import { PublicRecentAttendance } from "@/components/publik/public-recent-attendance";
 import { PublicStudentSearch } from "@/components/publik/public-student-search";
 import { PublicHeader } from "@/components/publik/public-header";
-import { Users, CheckCircle2, Clock, UserX } from "lucide-react";
+import {
+  Users,
+  CheckCircle2,
+  Clock,
+  Stethoscope,
+  FileText,
+  XCircle,
+  HelpCircle,
+} from "lucide-react";
 
 
 // Halaman ini mengklaim "real-time" (lihat copy di hero section), tapi tanpa
@@ -91,14 +99,37 @@ export default async function PublicHomePage() {
       <main className="relative mx-auto -mt-10 max-w-6xl space-y-6 px-4 pb-10 lg:-mt-12 lg:px-6">
         <PublicStudentSearch />
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <PublicStatCard label="Total Siswa" value={recap.totalSiswa} icon={Users} tone="neutral" />
+               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          <PublicStatCard
+            label="Total Murid"
+            value={recap.totalSiswa}
+            icon={Users}
+            tone="neutral"
+          />
           <PublicStatCard
             label="Hadir"
-            value={recap.counts.HADIR}
+            value={hadirTotal}
             icon={CheckCircle2}
             tone="success"
-            sublabel={`${persentaseKehadiran}% kehadiran`}
+            sublabel={`${persentaseKehadiran}% (tepat waktu + terlambat)`}
+          />
+          <PublicStatCard
+            label="Sakit"
+            value={recap.counts.SAKIT}
+            icon={Stethoscope}
+            tone="info"
+          />
+          <PublicStatCard
+            label="Izin"
+            value={recap.counts.IZIN}
+            icon={FileText}
+            tone="primary"
+          />
+          <PublicStatCard
+            label="Alpha"
+            value={recap.counts.ALPHA}
+            icon={XCircle}
+            tone="danger"
           />
           <PublicStatCard
             label="Terlambat"
@@ -107,9 +138,9 @@ export default async function PublicHomePage() {
             tone="warning"
           />
           <PublicStatCard
-            label="Belum Absen"
+            label="Tidak Diketahui"
             value={recap.counts.BELUM_ABSEN}
-            icon={UserX}
+            icon={HelpCircle}
             tone="neutral"
           />
         </div>
