@@ -1,9 +1,16 @@
+// components/absensi/scan-result.tsx
 "use client";
-import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
+import type { AttendanceCheckInResponse, AttendanceCheckOutResponse } from "@/lib/types/attendance";
 
+type ScanFeedback = AttendanceCheckInResponse | AttendanceCheckOutResponse;
 
-
-export function ScanResult({ result }: { result: AttendanceCheckInResponse }) {
+export function ScanResult({
+  result,
+  mode = "masuk",
+}: {
+  result: ScanFeedback;
+  mode?: "masuk" | "pulang";
+}) {
   const jam = "time" in result && result.time
     ? new Intl.DateTimeFormat("id-ID", {
         hour: "2-digit",
@@ -24,7 +31,9 @@ export function ScanResult({ result }: { result: AttendanceCheckInResponse }) {
   if (result.type === "SUCCESS") {
     return (
       <div className="rounded-2xl border-2 border-green-500 bg-green-50 p-6 text-center dark:bg-green-950">
-        <p className="text-lg font-bold text-green-700 dark:text-green-400">✓ ABSENSI BERHASIL</p>
+        <p className="text-lg font-bold text-green-700 dark:text-green-400">
+          {mode === "pulang" ? "✓ ABSEN PULANG BERHASIL" : "✓ ABSENSI BERHASIL"}
+        </p>
         <p className="mt-3 text-xl font-semibold">{result.student.name}</p>
         <p className="text-sm text-muted-foreground">{result.student.nisn} · {result.student.className}</p>
         <p className="mt-2 text-sm">{tanggal}</p>
@@ -44,6 +53,29 @@ export function ScanResult({ result }: { result: AttendanceCheckInResponse }) {
         <p className="text-sm text-muted-foreground">{result.student.className}</p>
         <p className="mt-2 text-sm">Sudah melakukan absensi pada:</p>
         <p className="text-2xl font-mono font-bold">{jam}</p>
+      </div>
+    );
+  }
+
+  if (result.type === "ALREADY_CHECKED_OUT") {
+    return (
+      <div className="rounded-2xl border-2 border-amber-500 bg-amber-50 p-6 text-center dark:bg-amber-950">
+        <p className="text-lg font-bold text-amber-700 dark:text-amber-400">SUDAH ABSEN PULANG</p>
+        <p className="mt-3 text-xl font-semibold">{result.student.name}</p>
+        <p className="text-sm text-muted-foreground">{result.student.className}</p>
+        <p className="mt-2 text-sm">Sudah tercatat pulang pada:</p>
+        <p className="text-2xl font-mono font-bold">{jam}</p>
+      </div>
+    );
+  }
+
+  if (result.type === "NOT_CHECKED_IN") {
+    return (
+      <div className="rounded-2xl border-2 border-red-500 bg-red-50 p-6 text-center dark:bg-red-950">
+        <p className="text-lg font-bold text-red-700 dark:text-red-400">BELUM ABSEN MASUK</p>
+        <p className="mt-3 text-xl font-semibold">{result.student.name}</p>
+        <p className="text-sm text-muted-foreground">{result.student.className}</p>
+        <p className="mt-2 text-sm">Siswa belum tercatat absen masuk hari ini.</p>
       </div>
     );
   }

@@ -15,7 +15,7 @@ import { ScanDialog } from "@/components/absensi/scan-dialog";
 import { StatusDropdown } from "@/components/absensi/status-dropdown";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import type { AttendanceTableRow, ClassOption } from "@/lib/types/attendance";
-
+import { ScanDialogPulang } from "@/components/absensi/scan-dialog-pulang";
 function todayJakarta() {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" });
   return formatter.format(new Date());
@@ -77,7 +77,10 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     <div className="mx-auto max-w-5xl">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Absensi Siswa</h1>
-        <ScanDialog onSuccess={loadTable} />
+        <div className="flex gap-2">
+          <ScanDialogPulang onSuccess={loadTable} />
+          <ScanDialog onSuccess={loadTable} />
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
