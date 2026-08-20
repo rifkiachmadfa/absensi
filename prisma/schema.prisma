@@ -72,6 +72,7 @@ model Attendance {
   studentId    String
   date         DateTime
   checkInAt    DateTime
+  checkOutAt   DateTime?
   status       AttendanceStatus
   method       AttendanceMethod
   recordedById String?
