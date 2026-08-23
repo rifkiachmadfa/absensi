@@ -90,6 +90,27 @@ export function buildStudentCardsPdf(
   return doc;
 }
 
+/**
+ * Bangun PDF berisi SATU kartu murid saja (1 halaman = 1 kartu).
+ *
+ * Dipakai saat mengekspor banyak murid sekaligus (per kelas / seluruh
+ * murid) di mana setiap murid harus menjadi file PDF-nya sendiri,
+ * alih-alih digabung ke dalam satu PDF multi-halaman.
+ */
+export function buildStudentCardPdf(
+  card: StudentIdCardPdfData,
+  schoolName: string,
+  logoDataUrl?: string
+): jsPDF {
+  const doc = new jsPDF({
+    unit: "mm",
+    format: [CARD_WIDTH_MM, CARD_HEIGHT_MM],
+    orientation: "portrait",
+  });
+  drawCard(doc, card, schoolName, logoDataUrl);
+  return doc;
+}
+
 function drawCard(
   doc: jsPDF,
   card: StudentIdCardPdfData,
