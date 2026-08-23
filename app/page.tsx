@@ -23,14 +23,20 @@ import {
   XCircle,
   HelpCircle,
 } from "lucide-react";
+import { PublicRealtimeListener } from "@/components/publik/public-realtime-listener";
 
 
-// Halaman ini mengklaim "real-time" (lihat copy di hero section), tapi tanpa
-// dynamic API (cookies/headers) Next.js akan men-static-render & meng-cache
-// halaman ini tanpa batas waktu. `revalidate` di sini adalah baseline ISR --
-// auto-refresh tiap 30 detik meski tidak ada revalidatePath("/") yang
-// dipanggil dari action manapun. Perubahan lewat action/API tetap langsung
-// terlihat karena masing-masing sudah memanggil revalidatePath("/").
+// Halaman ini mengklaim "real-time" (lihat copy di hero section). Tanpa
+// dynamic API (cookies/headers), Next.js akan men-static-render & meng-cache
+// halaman ini. `revalidate` di sini adalah baseline ISR -- auto-refresh
+// tiap 30 detik meski tidak ada revalidatePath("/") yang dipanggil dari
+// action manapun. Perubahan lewat action/API tetap langsung terlihat
+// karena masing-masing sudah memanggil revalidatePath("/").
+//
+// Agar tab yang SEDANG TERBUKA ikut update tanpa reload manual,
+// <PublicRealtimeListener /> di bawah subscribe ke perubahan tabel
+// Attendance via Supabase Realtime dan memanggil router.refresh() saat ada
+// event masuk -- lihat components/publik/public-realtime-listener.tsx.
 export const revalidate = 30;
 
 
@@ -67,6 +73,7 @@ export default async function PublicHomePage() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFA]">
+      <PublicRealtimeListener />
       <PublicHeader />
 
       {/* HERO -- gradient dekoratif dalam keluarga brand (UI_RULES §8: hanya
