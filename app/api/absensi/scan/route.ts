@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
     const statusCode =
       result.type === "SUCCESS" ? 201 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
-      result.type === "STUDENT_INACTIVE" ? 409 : 200;
+      result.type === "STUDENT_INACTIVE" ? 409 :
+      result.type === "SCHOOL_CLOSED" ? 403 : 200;
 
     // Absensi baru langsung mengubah angka Hadir/Terlambat/Belum Absen di
     // dashboard publik "/" -- invalidate cache-nya hanya ketika record baru

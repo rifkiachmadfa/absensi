@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
       result.type === "SUCCESS" ? 200 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
       result.type === "STUDENT_INACTIVE" ? 409 :
-      result.type === "NOT_CHECKED_IN" ? 409 : 200;
-
+      result.type === "NOT_CHECKED_IN" ? 409 :
+      result.type === "SCHOOL_CLOSED" ? 403 : 200;
     // Sama seperti scan absen masuk: invalidate dashboard publik "/" hanya
     // saat checkOutAt benar-benar tersimpan.
     if (result.type === "SUCCESS") {

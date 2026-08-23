@@ -80,6 +80,17 @@ export function ScanResult({
     );
   }
 
+  if (result.type === "SCHOOL_CLOSED") {
+    return (
+      <div className="rounded-2xl border-2 border-[#FFCC31] bg-[#FFF8D9] p-6 text-center">
+        <p className="text-lg font-bold text-[#17313A]">HARI INI LIBUR</p>
+        <p className="mt-2 text-sm text-[#48616A]">
+          Sistem absensi tidak aktif pada hari Sabtu &amp; Minggu.
+        </p>
+      </div>
+    );
+  }
+
   if (result.type === "STUDENT_INACTIVE") {
     return (
       <div className="rounded-2xl border-2 border-red-500 bg-red-50 p-6 text-center dark:bg-red-950">

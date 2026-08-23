@@ -34,7 +34,8 @@ export async function POST(req: NextRequest) {
     const statusCode =
       result.type === "SUCCESS" ? 201 :
       result.type === "STUDENT_NOT_FOUND" ? 404 :
-      result.type === "STUDENT_INACTIVE" ? 409 : 200;
+      result.type === "STUDENT_INACTIVE" ? 409 :
+      result.type === "SCHOOL_CLOSED" ? 403 : 200;
 
     // Sama seperti QR scan: invalidate dashboard publik "/" hanya saat
     // record absensi baru benar-benar tersimpan.

@@ -19,7 +19,8 @@ export type AttendanceCheckInResponse =
       status: string;
     }
   | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string };
+  | { type: "STUDENT_NOT_FOUND"; message?: string }
+  | { type: "SCHOOL_CLOSED" };
 
 // Hasil check-out (POST /api/absensi/scan-pulang atau /api/absensi/manual-pulang)
 // -- mengisi checkOutAt pada record Attendance hari itu yang SUDAH ADA
@@ -40,7 +41,8 @@ export type AttendanceCheckOutResponse =
     }
   | { type: "NOT_CHECKED_IN"; student: { name: string; className: string } }
   | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string };
+  | { type: "STUDENT_NOT_FOUND"; message?: string }
+  | { type: "SCHOOL_CLOSED" };
 
 export type AttendanceTableRow = {
   studentId: string;

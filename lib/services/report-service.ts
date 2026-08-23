@@ -6,7 +6,8 @@ import {
   StudentStatus,
   ClassStatus,
 } from "@/app/generated/prisma/client";
-import { getTodayDateOnly } from "@/lib/services/attendance-service";
+import { getTodayDateOnly, isWeekendDate } from "@/lib/services/attendance-service";
+
 
 // ============================================================
 // Types
@@ -165,10 +166,6 @@ export type MonthOption = { value: string; label: string };
 
 const WEEKDAY_LABEL = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 
-function isWeekendDate(date: Date): boolean {
-  const day = date.getUTCDay();
-  return day === 0 || day === 6;
-}
 
 function countSchoolDays(start: Date, end: Date): number {
   if (end.getTime() < start.getTime()) return 0;

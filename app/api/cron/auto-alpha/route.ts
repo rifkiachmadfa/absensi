@@ -3,9 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { AttendanceService, getTodayDateOnly } from "@/lib/services/attendance-service";
 
 // Dipanggil oleh Vercel Cron (lihat vercel.json, jadwal "0 5 * * *" UTC =
-// 12:00 Asia/Jakarta, Section 11: siswa yang sampai batas waktu ini belum
-// absen otomatis diberi status ALPHA). BUKAN endpoint untuk dipanggil dari
-// UI -- tidak memakai sesi guru/admin, hanya CRON_SECRET.
+// 12:00 Asia/Jakarta, SETIAP HARI termasuk Sabtu/Minggu -- Vercel Cron tidak
+// mendukung jadwal "Senin-Jumat saja" tanpa cron expression day-of-week yang
+// rawan salah baca timezone, jadi cron ini SENGAJA tetap jalan tiap hari dan
+// mengandalkan guard isWeekendDate() di dalam
+// AttendanceService.markUnrecordedAsAlpha() untuk no-op di akhir pekan --
+// lihat komentar di sana. Section 11: siswa yang sampai batas waktu ini
+// belum absen otomatis diberi status ALPHA, TAPI HANYA di hari sekolah.
+// BUKAN endpoint untuk dipanggil dari UI -- tidak memakai sesi guru/admin,
+// hanya CRON_SECRET.
 //
 // Diamankan dengan header "Authorization: Bearer <CRON_SECRET>" yang otomatis
 // dikirim Vercel Cron ketika env var CRON_SECRET diset di project settings

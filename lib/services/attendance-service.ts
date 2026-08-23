@@ -19,7 +19,8 @@ export type CheckInResult =
   | { type: "SUCCESS"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "STUDENT_NOT_FOUND" }
-  | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary }
+  | { type: "SCHOOL_CLOSED" };
 
 // Hasil dari AttendanceService.identify (Phase 7, LEGACY -- tidak lagi dipakai
 // oleh /api/absensi/scan & /api/absensi/manual sejak checkIn() ada, lihat
@@ -35,13 +36,15 @@ export type CheckOutResult =
   | { type: "ALREADY_CHECKED_OUT"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "NOT_CHECKED_IN"; student: StudentSummary }
   | { type: "STUDENT_NOT_FOUND" }
-  | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary }
+  | { type: "SCHOOL_CLOSED" };
 
 export type IdentifyResult =
   | { type: "SUCCESS"; student: StudentSummary; suggestedStatus: AttendanceStatus }
   | { type: "ALREADY_CHECKED_IN"; student: StudentSummary; time: string; status: AttendanceStatus }
   | { type: "STUDENT_NOT_FOUND" }
-  | { type: "STUDENT_INACTIVE"; student: StudentSummary };
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary }
+  | { type: "SCHOOL_CLOSED" };
 
 export type SetManualStatusResult =
   | {
@@ -121,6 +124,22 @@ function getJakartaNow() {
 export function getTodayDateOnly(): Date {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE });
   return new Date(`${formatter.format(new Date())}T00:00:00.000Z`);
+}
+
+// Sekolah hanya masuk Senin-Jumat (lihat SCHOOL_DAYS di pengaturan-service.ts
+// & DAY_NAMES-nya). Satu-satunya definisi "akhir pekan" untuk seluruh sistem
+// -- dipakai checkIn()/checkOut()/identify() untuk menolak absensi di
+// Sabtu/Minggu, oleh cron auto-alpha untuk skip, dan oleh dashboard
+// (/dashboard & /) untuk menampilkan status "libur" alih-alih angka
+// perhitungan hari itu. JANGAN buat helper akhir-pekan duplikat di tempat
+// lain -- report-service.ts mengimpor helper ini juga.
+//
+// `date` di sini SELALU date-only (midnight UTC yang merepresentasikan
+// tanggal kalender Asia/Jakarta, hasil getTodayDateOnly()), karena itu
+// day-of-week dibaca lewat getUTCDay(), bukan getDay().
+export function isWeekendDate(date: Date): boolean {
+  const day = date.getUTCDay();
+  return day === 0 || day === 6; // 0 = Minggu, 6 = Sabtu
 }
 
 async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<AttendanceStatus> {
@@ -259,6 +278,14 @@ export class AttendanceService {
   }): Promise<IdentifyResult> {
     const { identifier, method } = params;
 
+    // Sabtu/Minggu: sekolah libur, sistem absensi tidak aktif (lihat
+    // isWeekendDate). Dicek PALING AWAL, sebelum query siswa apapun, supaya
+    // tidak ada absensi (atau bahkan identifikasi) yang bisa lolos di hari
+    // libur lewat jalur legacy ini.
+    if (isWeekendDate(getTodayDateOnly())) {
+      return { type: "SCHOOL_CLOSED" };
+    }
+
     const student = await prisma.student.findFirst({
       where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
       include: { class: true },
@@ -311,6 +338,15 @@ export class AttendanceService {
     recordedById: string;
   }): Promise<CheckInResult> {
     const { identifier, method, recordedById } = params;
+
+    // Sabtu/Minggu: sekolah libur, sistem absensi mati (Section 11 & 30 --
+    // siswa yang tidak sekolah bukan berarti ALPHA, dan hari libur bukan
+    // hari sekolah sama sekali). Dicek paling awal, sebelum query siswa,
+    // supaya TIDAK ADA jalur (QR ataupun manual) yang bisa membuat record
+    // Attendance di hari non-sekolah.
+    if (isWeekendDate(getTodayDateOnly())) {
+      return { type: "SCHOOL_CLOSED" };
+    }
 
     const student = await prisma.student.findFirst({
       where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
@@ -417,6 +453,12 @@ export class AttendanceService {
     recordedById: string;
   }): Promise<CheckOutResult> {
     const { identifier, method, recordedById } = params;
+
+    // Sabtu/Minggu: sekolah libur, sistem absensi (termasuk absen pulang)
+    // tidak aktif -- konsisten dengan guard yang sama di checkIn()/identify().
+    if (isWeekendDate(getTodayDateOnly())) {
+      return { type: "SCHOOL_CLOSED" };
+    }
 
     const student = await prisma.student.findFirst({
       where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
@@ -693,8 +735,18 @@ export class AttendanceService {
    */
   static async markUnrecordedAsAlpha(params: {
     date: Date;
-  }): Promise<{ marked: number; alreadyRecorded: number; totalActive: number }> {
+  }): Promise<{ marked: number; alreadyRecorded: number; totalActive: number; skippedWeekend: boolean }> {
     const { date } = params;
+
+    // Sabtu/Minggu bukan hari sekolah -- jangan pernah menandai siapapun
+    // ALPHA di hari libur (Section 11: BELUM_ABSEN != ALPHA, dan hari libur
+    // bukan hari sekolah sama sekali, jadi tidak relevan menghitung siapapun
+    // "belum absen"). Guard ini yang membuat cron job (vercel.json, berjalan
+    // SETIAP hari) aman dijalankan tanpa perlu jadwal cron terpisah untuk
+    // Senin-Jumat saja.
+    if (isWeekendDate(date)) {
+      return { marked: 0, alreadyRecorded: 0, totalActive: 0, skippedWeekend: true };
+    }
 
     const students = await prisma.student.findMany({
       where: { status: StudentStatus.ACTIVE },
@@ -747,7 +799,12 @@ export class AttendanceService {
       }
     }
 
-    return { marked, alreadyRecorded: alreadyRecordedIds.size, totalActive: students.length };
+    return {
+      marked,
+      alreadyRecorded: alreadyRecordedIds.size,
+      totalActive: students.length,
+      skippedWeekend: false,
+    };
   }
 
   /**
