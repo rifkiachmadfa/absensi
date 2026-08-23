@@ -68,11 +68,13 @@ export type ReportPayload = {
   perStudent: StudentReportRow[];
 };
 
+// 1) Tambahkan checkOutAt ke tipe:
 export type StudentAttendanceLogEntry = {
   date: string; // YYYY-MM-DD
   weekday: string; // "Senin".."Jumat"
   status: AttendanceStatus | "BELUM_ABSEN";
   checkInAt: string | null;
+  checkOutAt: string | null;   // ⬅️ BARU
 };
 
 export type StudentReportDetail = {
@@ -468,13 +470,14 @@ export async function getStudentAttendanceDetail(
     schoolDays,
   };
 
-  const attendances =
-    schoolDays > 0
-      ? await prisma.attendance.findMany({
-          where: { studentId: student.id, date: { gte: periodStart, lte: periodEnd } },
-          select: { date: true, status: true, checkInAt: true },
-        })
-      : [];
+// 2) Tambahkan checkOutAt ke query select (di dalam getStudentAttendanceDetail):
+const attendances =
+  schoolDays > 0
+    ? await prisma.attendance.findMany({
+        where: { studentId: student.id, date: { gte: periodStart, lte: periodEnd } },
+        select: { date: true, status: true, checkInAt: true, checkOutAt: true }, // ⬅️ tambah checkOutAt
+      })
+    : [];
 
   const byDate = new Map(attendances.map((a) => [toISODateOnly(a.date), a]));
 
@@ -484,12 +487,14 @@ export async function getStudentAttendanceDetail(
       if (isWeekendDate(day)) continue;
       const iso = toISODateOnly(day);
       const record = byDate.get(iso);
-      log.push({
-        date: iso,
-        weekday: WEEKDAY_LABEL[day.getUTCDay()],
-        status: record?.status ?? "BELUM_ABSEN",
-        checkInAt: record?.checkInAt.toISOString() ?? null,
-      });
+// 3) Tambahkan checkOutAt saat membangun log:
+log.push({
+  date: iso,
+  weekday: WEEKDAY_LABEL[day.getUTCDay()],
+  status: record?.status ?? "BELUM_ABSEN",
+  checkInAt: record?.checkInAt.toISOString() ?? null,
+  checkOutAt: record?.checkOutAt?.toISOString() ?? null,   // ⬅️ BARU
+});
     }
   }
   log.sort((a, b) => b.date.localeCompare(a.date)); // terbaru dulu

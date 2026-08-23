@@ -245,12 +245,13 @@ export default async function CekKehadiranPage({
                 <TableHead className="text-[#48616A]">Hari</TableHead>
                 <TableHead className="text-[#48616A]">Status</TableHead>
                 <TableHead className="text-[#48616A]">Jam Masuk</TableHead>
+                <TableHead className="text-[#48616A]">Jam Pulang</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {detail.log.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-[#71858C]">
+                  <TableCell colSpan={5} className="text-center text-[#71858C]">
                     Tidak ada hari sekolah pada periode ini.
                   </TableCell>
                 </TableRow>
@@ -279,6 +280,16 @@ export default async function CekKehadiranPage({
                           second: "2-digit",
                           timeZone: "Asia/Jakarta",
                         }).format(new Date(entry.checkInAt))
+                      : "-"}
+                  </TableCell>
+                  <TableCell>
+                    {entry.checkOutAt
+                      ? new Intl.DateTimeFormat("id-ID", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          timeZone: "Asia/Jakarta",
+                        }).format(new Date(entry.checkOutAt))
                       : "-"}
                   </TableCell>
                 </TableRow>
