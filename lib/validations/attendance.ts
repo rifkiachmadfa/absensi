@@ -2,6 +2,8 @@ import { z } from "zod";
 import { AttendanceStatus } from "@/app/generated/prisma/client";
 
 export const manualStatusValues = [
+  AttendanceStatus.HADIR,
+  AttendanceStatus.TERLAMBAT,
   AttendanceStatus.SAKIT,
   AttendanceStatus.IZIN,
   AttendanceStatus.DISPENSASI,
@@ -15,6 +17,14 @@ export const setStatusSchema = z.object({
 });
 
 export const updateStatusSchema = z.object({
+  status: z.enum(manualStatusValues as unknown as [string, ...string[]]),
+});
+
+// Perubahan status komunal (banyak siswa sekaligus) dari tabel /absensi.
+// Batas 500 sesuai estimasi beban maksimal siswa pada Section 38 spesifikasi.
+export const bulkSetStatusSchema = z.object({
+  studentIds: z.array(z.string().min(1)).min(1, "Pilih minimal satu siswa").max(500),
+  date: z.string().date(), // "YYYY-MM-DD"
   status: z.enum(manualStatusValues as unknown as [string, ...string[]]),
 });
 

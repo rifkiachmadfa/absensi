@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -13,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { ScanDialog } from "@/components/absensi/scan-dialog";
 import { StatusDropdown } from "@/components/absensi/status-dropdown";
+import { BulkStatusDropdown } from "@/components/absensi/bulk-status-dropdown";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import type { AttendanceTableRow, ClassOption } from "@/lib/types/attendance";
 import { ScanDialogPulang } from "@/components/absensi/scan-dialog-pulang";
@@ -29,6 +33,7 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [rows, setRows] = useState<AttendanceTableRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/kelas")
@@ -65,13 +70,61 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     return () => controller.abort();
   }, [loadTable]);
 
+  // Reset seleksi checkbox setiap kali filter berubah, supaya tidak ada
+  // studentId "terpilih" yang sudah tidak tampak di tabel (mis. pindah
+  // tanggal/kelas/status filter).
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [date, classId, statusFilter]);
+
   const filteredRows = rows.filter((r) =>
     search.trim().length === 0
       ? true
       : r.name.toLowerCase().includes(search.toLowerCase()) || r.nisn.includes(search)
   );
 
-  const colSpan = canEditStatus ? 6 : 5;
+  const selectedCount = selectedIds.size;
+  const visibleIds = useMemo(() => filteredRows.map((r) => r.studentId), [filteredRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some((id) => selectedIds.has(id));
+
+  const toggleRow = (studentId: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(studentId);
+      else next.delete(studentId);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        visibleIds.forEach((id) => next.add(id));
+      } else {
+        visibleIds.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDone = (result: {
+    successCount: number;
+    failed: { studentId: string; reason: string }[];
+  }) => {
+    if (result.successCount > 0) {
+      toast.success(`Status ${result.successCount} siswa berhasil diubah.`);
+    }
+    if (result.failed.length > 0) {
+      toast.error(`${result.failed.length} siswa gagal diubah statusnya.`);
+    }
+    setSelectedIds(new Set());
+    loadTable();
+  };
+
+  const colSpan = canEditStatus ? 7 : 5;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -121,10 +174,45 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
         />
       </div>
 
+      {canEditStatus && selectedCount > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <span className="text-sm font-medium text-foreground">
+            {selectedCount} siswa dipilih
+          </span>
+          <div className="flex items-center gap-2">
+            <BulkStatusDropdown
+              studentIds={Array.from(selectedIds)}
+              date={date}
+              onDone={handleBulkDone}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Batal
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
+              {canEditStatus && (
+                <th className="w-12 p-3">
+                  <div className="flex items-center justify-center">
+                    <Checkbox
+                      checked={allVisibleSelected}
+                      indeterminate={!allVisibleSelected && someVisibleSelected}
+                      onCheckedChange={(checked) => toggleAllVisible(checked === true)}
+                      disabled={visibleIds.length === 0}
+                      aria-label="Pilih semua"
+                    />
+                  </div>
+                </th>
+              )}
               <th className="p-3 text-left">Nama</th>
               <th className="p-3 text-left">NISN</th>
               <th className="p-3 text-left">Kelas</th>
@@ -152,7 +240,25 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
               </tr>
             ) : (
               filteredRows.map((row) => (
-                <tr key={row.studentId} className="border-t">
+                <tr
+                  key={row.studentId}
+                  className={
+                    "border-t" + (selectedIds.has(row.studentId) ? " bg-primary/5" : "")
+                  }
+                >
+                  {canEditStatus && (
+                    <td className="w-12 p-3">
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={selectedIds.has(row.studentId)}
+                          onCheckedChange={(checked) =>
+                            toggleRow(row.studentId, checked === true)
+                          }
+                          aria-label={`Pilih ${row.name}`}
+                        />
+                      </div>
+                    </td>
+                  )}
                   <td className="p-3 font-medium">{row.name}</td>
                   <td className="p-3">{row.nisn}</td>
                   <td className="p-3">{row.className}</td>

@@ -1,5 +1,12 @@
 // lib/constants/attendance.ts
-export const MANUAL_SETTABLE_STATUSES = ["SAKIT", "IZIN", "DISPENSASI", "ALPHA"] as const;
+export const MANUAL_SETTABLE_STATUSES = [
+  "HADIR",
+  "TERLAMBAT",
+  "SAKIT",
+  "IZIN",
+  "DISPENSASI",
+  "ALPHA",
+] as const;
 
 // Status yang bisa dipilih guru/petugas tepat setelah scan/identifikasi
 // berhasil (Phase 7 & 8). Semua status termasuk HADIR/TERLAMBAT karena

@@ -717,6 +717,46 @@ export class AttendanceService {
     };
   }
 
+    /**
+   * Perubahan status massal (komunal) untuk beberapa siswa sekaligus dari
+   * tabel /absensi, dipakai saat guru/admin mencentang banyak baris lalu
+   * memilih satu status untuk semuanya. SENGAJA memanggil setManualStatus()
+   * satu-per-satu (bukan reimplementasi logic terpisah) supaya validasi,
+   * audit log, dan aturan (mis. FUTURE_DATE_NOT_ALLOWED) tetap konsisten
+   * dengan perubahan status satuan lewat StatusDropdown.
+   *
+   * Tidak menghentikan proses jika satu siswa gagal -- siswa lain tetap
+   * diproses, dan daftar kegagalan dikembalikan supaya UI bisa memberi tahu
+   * guru/admin siswa mana saja yang tidak berhasil diubah.
+   */
+  static async setManualStatusBulk(params: {
+    studentIds: string[];
+    date: Date;
+    newStatus: AttendanceStatus;
+    updatedById: string;
+  }): Promise<{
+    successCount: number;
+    failed: { studentId: string; reason: string }[];
+  }> {
+    const { studentIds, date, newStatus, updatedById } = params;
+
+    let successCount = 0;
+    const failed: { studentId: string; reason: string }[] = [];
+
+    for (const studentId of studentIds) {
+      const result = await this.setManualStatus({ studentId, date, newStatus, updatedById });
+      if (result.type === "SUCCESS") {
+        successCount += 1;
+      } else if (result.type === "STUDENT_NOT_FOUND") {
+        failed.push({ studentId, reason: "Siswa tidak ditemukan." });
+      } else {
+        failed.push({ studentId, reason: "Tanggal yang akan datang tidak dapat diubah." });
+      }
+    }
+
+    return { successCount, failed };
+  }
+
   /**
    * Auto-ALPHA batas akhir absensi (Section 11): siswa aktif yang SAMPAI SAAT
    * INI belum punya record absensi pada `date` otomatis diberi status ALPHA.
