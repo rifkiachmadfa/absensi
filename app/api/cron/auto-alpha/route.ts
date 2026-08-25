@@ -6,8 +6,9 @@ import { AttendanceService, getTodayDateOnly } from "@/lib/services/attendance-s
 // 12:00 Asia/Jakarta, SETIAP HARI termasuk Sabtu/Minggu -- Vercel Cron tidak
 // mendukung jadwal "Senin-Jumat saja" tanpa cron expression day-of-week yang
 // rawan salah baca timezone, jadi cron ini SENGAJA tetap jalan tiap hari dan
-// mengandalkan guard isWeekendDate() di dalam
-// AttendanceService.markUnrecordedAsAlpha() untuk no-op di akhir pekan --
+// mengandalkan guard isNonSchoolDay() (akhir pekan ATAU hari libur yang
+// diatur admin di /pengaturan) di dalam
+// AttendanceService.markUnrecordedAsAlpha() untuk no-op di hari non-sekolah --
 // lihat komentar di sana. Section 11: siswa yang sampai batas waktu ini
 // belum absen otomatis diberi status ALPHA, TAPI HANYA di hari sekolah.
 // BUKAN endpoint untuk dipanggil dari UI -- tidak memakai sesi guru/admin,

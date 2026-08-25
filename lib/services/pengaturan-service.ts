@@ -7,6 +7,7 @@ import type {
   ChangePasswordInput,
   AttendanceScheduleInput,
   DefaultScheduleInput,
+  HolidayInput,
 } from "@/lib/validations/pengaturan";
 
 export class PengaturanServiceError extends Error {}
@@ -184,4 +185,68 @@ export async function updateDefaultSchedule(
   });
 
   return setting;
+}
+
+// ============================================================
+// Hari Libur — khusus SUPERADMIN (Section 11 project spec: hari libur
+// non-akhir-pekan tidak boleh dihitung sebagai hari sekolah, baik untuk
+// checkIn/checkOut/identify, auto-ALPHA, maupun perhitungan schoolDays di
+// laporan -- lihat isNonSchoolDay()/getHolidayDateSet() di
+// attendance-service.ts).
+// ============================================================
+
+export async function listHolidays() {
+  return prisma.holiday.findMany({
+    orderBy: { date: "asc" },
+  });
+}
+
+export async function createHoliday(data: HolidayInput, actor: SessionUser) {
+  const date = new Date(`${data.date}T00:00:00.000Z`);
+
+  const existing = await prisma.holiday.findUnique({ where: { date } });
+  if (existing) {
+    throw new PengaturanServiceError(
+      `Tanggal ${data.date} sudah terdaftar sebagai hari libur (${existing.name}).`
+    );
+  }
+
+  const holiday = await prisma.holiday.create({
+    data: {
+      date,
+      name: data.name,
+      createdById: actor.id,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: actor.id,
+      action: "CREATE",
+      entity: "Holiday",
+      entityId: holiday.id,
+      description: `Menambahkan hari libur ${data.date}: ${data.name}`,
+    },
+  });
+
+  return holiday;
+}
+
+export async function deleteHoliday(id: string, actor: SessionUser) {
+  const holiday = await prisma.holiday.findUnique({ where: { id } });
+  if (!holiday) {
+    throw new PengaturanServiceError("Hari libur tidak ditemukan.");
+  }
+
+  await prisma.holiday.delete({ where: { id } });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: actor.id,
+      action: "DELETE",
+      entity: "Holiday",
+      entityId: holiday.id,
+      description: `Menghapus hari libur ${holiday.date.toISOString().slice(0, 10)}: ${holiday.name}`,
+    },
+  });
 }

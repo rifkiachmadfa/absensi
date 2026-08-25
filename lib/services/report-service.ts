@@ -6,7 +6,11 @@ import {
   StudentStatus,
   ClassStatus,
 } from "@/app/generated/prisma/client";
-import { getTodayDateOnly, isWeekendDate } from "@/lib/services/attendance-service";
+import {
+  getTodayDateOnly,
+  isWeekendDate,
+  getHolidayDateSet,
+} from "@/lib/services/attendance-service";
 
 
 // ============================================================
@@ -167,12 +171,12 @@ export type MonthOption = { value: string; label: string };
 const WEEKDAY_LABEL = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 
 
-function countSchoolDays(start: Date, end: Date): number {
+function countSchoolDays(start: Date, end: Date, holidaySet: Set<string> = new Set()): number {
   if (end.getTime() < start.getTime()) return 0;
   let count = 0;
   const cursor = new Date(start);
   while (cursor.getTime() <= end.getTime()) {
-    if (!isWeekendDate(cursor)) count += 1;
+    if (!isWeekendDate(cursor) && !holidaySet.has(toISODateOnly(cursor))) count += 1;
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return count;
@@ -302,7 +306,8 @@ export async function getAttendanceReport(
       ? today
       : periodEndRequested;
 
-  const schoolDays = countSchoolDays(periodStart, periodEnd);
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
 
   const period: ReportPeriod = {
     mode,
@@ -457,7 +462,8 @@ export async function getStudentAttendanceDetail(
       ? today
       : periodEndRequested;
 
-  const schoolDays = countSchoolDays(periodStart, periodEnd);
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
 
   const period: ReportPeriod = {
     mode,
@@ -467,31 +473,29 @@ export async function getStudentAttendanceDetail(
     schoolDays,
   };
 
-// 2) Tambahkan checkOutAt ke query select (di dalam getStudentAttendanceDetail):
-const attendances =
-  schoolDays > 0
-    ? await prisma.attendance.findMany({
-        where: { studentId: student.id, date: { gte: periodStart, lte: periodEnd } },
-        select: { date: true, status: true, checkInAt: true, checkOutAt: true }, // ⬅️ tambah checkOutAt
-      })
-    : [];
+  const attendances =
+    schoolDays > 0
+      ? await prisma.attendance.findMany({
+          where: { studentId: student.id, date: { gte: periodStart, lte: periodEnd } },
+          select: { date: true, status: true, checkInAt: true, checkOutAt: true },
+        })
+      : [];
 
   const byDate = new Map(attendances.map((a) => [toISODateOnly(a.date), a]));
 
   const log: StudentAttendanceLogEntry[] = [];
   if (schoolDays > 0) {
     for (const day of eachDateInRange(periodStart, periodEnd)) {
-      if (isWeekendDate(day)) continue;
+      if (isWeekendDate(day) || holidaySet.has(toISODateOnly(day))) continue;
       const iso = toISODateOnly(day);
       const record = byDate.get(iso);
-// 3) Tambahkan checkOutAt saat membangun log:
-log.push({
-  date: iso,
-  weekday: WEEKDAY_LABEL[day.getUTCDay()],
-  status: record?.status ?? "BELUM_ABSEN",
-  checkInAt: record?.checkInAt.toISOString() ?? null,
-  checkOutAt: record?.checkOutAt?.toISOString() ?? null,   // ⬅️ BARU
-});
+      log.push({
+        date: iso,
+        weekday: WEEKDAY_LABEL[day.getUTCDay()],
+        status: record?.status ?? "BELUM_ABSEN",
+        checkInAt: record?.checkInAt.toISOString() ?? null,
+        checkOutAt: record?.checkOutAt?.toISOString() ?? null,
+      });
     }
   }
   log.sort((a, b) => b.date.localeCompare(a.date)); // terbaru dulu
@@ -579,11 +583,20 @@ export async function getAttendanceTrend(params: {
   }
 
   if (mode === "daily") {
-    // Kumpulkan N hari sekolah terakhir (mundur dari hari ini).
+    // Kumpulkan N hari sekolah terakhir (mundur dari hari ini). Ambil set
+    // hari libur untuk jendela mundur yang cukup lebar (90 hari kalender --
+    // jauh lebih dari cukup untuk menampung 14 hari sekolah + hari libur di
+    // dalamnya) sekali di awal, supaya loop mundur tidak query per-hari.
+    const lookbackStart = new Date(today);
+    lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 90);
+    const holidaySet = await getHolidayDateSet(lookbackStart, today);
+
     const schoolDates: Date[] = [];
     const cursor = new Date(today);
     while (schoolDates.length < DAILY_TREND_POINTS) {
-      if (!isWeekendDate(cursor)) schoolDates.unshift(new Date(cursor));
+      if (!isWeekendDate(cursor) && !holidaySet.has(toISODateOnly(cursor))) {
+        schoolDates.unshift(new Date(cursor));
+      }
       cursor.setUTCDate(cursor.getUTCDate() - 1);
     }
     const rangeStart = schoolDates[0];
@@ -629,6 +642,8 @@ export async function getAttendanceTrend(params: {
     monthStarts.push(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i, 1)));
   }
 
+  const monthlyHolidaySet = await getHolidayDateSet(monthStarts[0], today);
+
   const attendances = await prisma.attendance.findMany({
     where: {
       date: { gte: monthStarts[0], lte: today },
@@ -642,7 +657,7 @@ export async function getAttendanceTrend(params: {
       Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)
     );
     const monthEnd = monthEndRequested.getTime() > today.getTime() ? today : monthEndRequested;
-    const schoolDays = countSchoolDays(monthStart, monthEnd);
+    const schoolDays = countSchoolDays(monthStart, monthEnd, monthlyHolidaySet);
 
     const inMonth = attendances.filter(
       (a) => a.date.getTime() >= monthStart.getTime() && a.date.getTime() <= monthEnd.getTime()
@@ -703,10 +718,16 @@ export async function getClassAttendanceTrend(params?: {
 
   // 14 hari sekolah terakhir -- sama persis dengan getAttendanceTrend(daily)
   // supaya kedua chart di dashboard selalu merujuk periode yang sama.
+  const lookbackStart = new Date(today);
+  lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 90);
+  const holidaySet = await getHolidayDateSet(lookbackStart, today);
+
   const schoolDates: Date[] = [];
   const cursor = new Date(today);
   while (schoolDates.length < DAILY_TREND_POINTS) {
-    if (!isWeekendDate(cursor)) schoolDates.unshift(new Date(cursor));
+    if (!isWeekendDate(cursor) && !holidaySet.has(toISODateOnly(cursor))) {
+      schoolDates.unshift(new Date(cursor));
+    }
     cursor.setUTCDate(cursor.getUTCDate() - 1);
   }
   const rangeStart = schoolDates[0];
@@ -830,7 +851,8 @@ export async function getTopDisciplinedStudents(params: {
   }
 
   const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
-  const schoolDays = countSchoolDays(periodStart, periodEnd);
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
 
   const students = await prisma.student.findMany({
     where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },

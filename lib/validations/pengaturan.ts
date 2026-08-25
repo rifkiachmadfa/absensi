@@ -60,3 +60,22 @@ export const defaultScheduleSchema = z
   });
 
 export type DefaultScheduleInput = z.infer<typeof defaultScheduleSchema>;
+
+// ============================================================
+// Hari Libur — khusus SUPERADMIN
+// ============================================================
+
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD");
+
+export const holidaySchema = z.object({
+  date: isoDateSchema,
+  name: z
+    .string()
+    .trim()
+    .min(1, "Nama hari libur wajib diisi.")
+    .max(150, "Nama hari libur maksimal 150 karakter."),
+});
+
+export type HolidayInput = z.infer<typeof holidaySchema>;

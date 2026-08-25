@@ -18,6 +18,7 @@ model User {
   attendances     Attendance[] @relation("RecordedBy")
   auditLogs       AuditLog[]
   homeroomClasses Class[]      @relation("HomeroomTeacher")
+  createdHolidays Holiday[]    @relation("HolidayCreatedBy")
 }
 
 model AcademicYear {
@@ -95,6 +96,25 @@ model AttendanceSchedule {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Hari libur non-akhir-pekan (libur nasional, libur sekolah, dsb).
+// `date` selalu date-only (midnight UTC yang merepresentasikan tanggal
+// kalender Asia/Jakarta), konsisten dengan Attendance.date & getTodayDateOnly()
+// di attendance-service.ts -- lihat isHoliday()/isSchoolDay() di sana.
+// Dicek BERSAMA isWeekendDate() di setiap jalur yang menentukan "hari
+// sekolah": checkIn/checkOut/identify, markUnrecordedAsAlpha (cron
+// auto-ALPHA), dan seluruh perhitungan schoolDays di report-service.ts.
+model Holiday {
+  id          String   @id @default(cuid())
+  date        DateTime @unique
+  name        String
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User?    @relation("HolidayCreatedBy", fields: [createdById], references: [id])
+
+  @@index([date])
 }
 
 model AuditLog {

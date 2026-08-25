@@ -142,6 +142,39 @@ export function isWeekendDate(date: Date): boolean {
   return day === 0 || day === 6; // 0 = Minggu, 6 = Sabtu
 }
 
+// Hari libur di LUAR akhir pekan (libur nasional, libur sekolah, dsb --
+// lihat model Holiday di schema.prisma & pengaturan-service.ts). `date`
+// harus date-only (midnight UTC), sama seperti isWeekendDate().
+export async function isHoliday(date: Date): Promise<boolean> {
+  const holiday = await prisma.holiday.findUnique({
+    where: { date },
+    select: { id: true },
+  });
+  return holiday !== null;
+}
+
+// Satu-satunya definisi "bukan hari sekolah" untuk seluruh sistem: akhir
+// pekan ATAU hari libur yang diatur admin di /pengaturan. Dipakai
+// checkIn()/checkOut()/identify() untuk menolak absensi, oleh
+// markUnrecordedAsAlpha() untuk skip auto-ALPHA, dan report-service.ts
+// (lewat getHolidayDateSet + isWeekendDate) untuk perhitungan schoolDays.
+// JANGAN buat helper "hari sekolah" duplikat di tempat lain.
+export async function isNonSchoolDay(date: Date): Promise<boolean> {
+  return isWeekendDate(date) || (await isHoliday(date));
+}
+
+// Ambil seluruh tanggal libur (non-akhir-pekan) dalam satu rentang sekaligus
+// sebagai Set<"YYYY-MM-DD">, supaya kode yang meng-iterasi rentang tanggal
+// (report-service.ts) tidak melakukan query per-hari (N+1). `start`/`end`
+// harus date-only (midnight UTC), inklusif di kedua ujung.
+export async function getHolidayDateSet(start: Date, end: Date): Promise<Set<string>> {
+  const holidays = await prisma.holiday.findMany({
+    where: { date: { gte: start, lte: end } },
+    select: { date: true },
+  });
+  return new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+}
+
 async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<AttendanceStatus> {
   const daySchedule = await prisma.attendanceSchedule.findFirst({
     where: { dayOfWeek, isActive: true },
@@ -278,11 +311,11 @@ export class AttendanceService {
   }): Promise<IdentifyResult> {
     const { identifier, method } = params;
 
-    // Sabtu/Minggu: sekolah libur, sistem absensi tidak aktif (lihat
-    // isWeekendDate). Dicek PALING AWAL, sebelum query siswa apapun, supaya
-    // tidak ada absensi (atau bahkan identifikasi) yang bisa lolos di hari
-    // libur lewat jalur legacy ini.
-    if (isWeekendDate(getTodayDateOnly())) {
+    // Sabtu/Minggu ATAU hari libur yang diatur admin (lihat isNonSchoolDay).
+    // Dicek PALING AWAL, sebelum query siswa apapun, supaya tidak ada
+    // absensi (atau bahkan identifikasi) yang bisa lolos di hari libur
+    // lewat jalur legacy ini.
+    if (await isNonSchoolDay(getTodayDateOnly())) {
       return { type: "SCHOOL_CLOSED" };
     }
 
@@ -339,12 +372,12 @@ export class AttendanceService {
   }): Promise<CheckInResult> {
     const { identifier, method, recordedById } = params;
 
-    // Sabtu/Minggu: sekolah libur, sistem absensi mati (Section 11 & 30 --
+    // Sabtu/Minggu ATAU hari libur yang diatur admin (Section 11 & 30 --
     // siswa yang tidak sekolah bukan berarti ALPHA, dan hari libur bukan
     // hari sekolah sama sekali). Dicek paling awal, sebelum query siswa,
     // supaya TIDAK ADA jalur (QR ataupun manual) yang bisa membuat record
     // Attendance di hari non-sekolah.
-    if (isWeekendDate(getTodayDateOnly())) {
+    if (await isNonSchoolDay(getTodayDateOnly())) {
       return { type: "SCHOOL_CLOSED" };
     }
 
@@ -454,9 +487,9 @@ export class AttendanceService {
   }): Promise<CheckOutResult> {
     const { identifier, method, recordedById } = params;
 
-    // Sabtu/Minggu: sekolah libur, sistem absensi (termasuk absen pulang)
+    // Sabtu/Minggu ATAU hari libur: sistem absensi (termasuk absen pulang)
     // tidak aktif -- konsisten dengan guard yang sama di checkIn()/identify().
-    if (isWeekendDate(getTodayDateOnly())) {
+    if (await isNonSchoolDay(getTodayDateOnly())) {
       return { type: "SCHOOL_CLOSED" };
     }
 
@@ -778,13 +811,13 @@ export class AttendanceService {
   }): Promise<{ marked: number; alreadyRecorded: number; totalActive: number; skippedWeekend: boolean }> {
     const { date } = params;
 
-    // Sabtu/Minggu bukan hari sekolah -- jangan pernah menandai siapapun
-    // ALPHA di hari libur (Section 11: BELUM_ABSEN != ALPHA, dan hari libur
-    // bukan hari sekolah sama sekali, jadi tidak relevan menghitung siapapun
-    // "belum absen"). Guard ini yang membuat cron job (vercel.json, berjalan
-    // SETIAP hari) aman dijalankan tanpa perlu jadwal cron terpisah untuk
-    // Senin-Jumat saja.
-    if (isWeekendDate(date)) {
+    // Sabtu/Minggu ATAU hari libur bukan hari sekolah -- jangan pernah
+    // menandai siapapun ALPHA di hari libur (Section 11: BELUM_ABSEN !=
+    // ALPHA, dan hari libur bukan hari sekolah sama sekali, jadi tidak
+    // relevan menghitung siapapun "belum absen"). Guard ini yang membuat
+    // cron job (vercel.json, berjalan SETIAP hari) aman dijalankan tanpa
+    // perlu jadwal cron terpisah untuk Senin-Jumat saja.
+    if (await isNonSchoolDay(date)) {
       return { marked: 0, alreadyRecorded: 0, totalActive: 0, skippedWeekend: true };
     }
 

@@ -9,11 +9,14 @@ import {
   changePasswordSchema,
   attendanceScheduleSchema,
   defaultScheduleSchema,
+  holidaySchema,
 } from "@/lib/validations/pengaturan";
 import {
   changeOwnPassword,
   upsertAttendanceSchedule,
   updateDefaultSchedule,
+  createHoliday,
+  deleteHoliday,
   PengaturanServiceError,
 } from "@/lib/services/pengaturan-service";
 
@@ -85,6 +88,47 @@ export async function upsertAttendanceScheduleAction(
 
   revalidatePath("/pengaturan");
   return { success: true };
+}
+
+export async function createHolidayAction(
+  _prevState: PengaturanFormState,
+  formData: FormData
+): Promise<PengaturanFormState> {
+  const actor = await requireRole(["SUPERADMIN"]);
+
+  const parsed = holidaySchema.safeParse({
+    date: formData.get("date"),
+    name: formData.get("name"),
+  });
+
+  if (!parsed.success) {
+    return { fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  try {
+    await createHoliday(parsed.data, actor);
+  } catch (error) {
+    if (error instanceof PengaturanServiceError) {
+      return { error: error.message };
+    }
+    console.error("createHolidayAction error:", error);
+    return { error: "Terjadi kesalahan, silakan coba lagi." };
+  }
+
+  revalidatePath("/pengaturan");
+  return { success: true };
+}
+
+export async function deleteHolidayAction(id: string): Promise<void> {
+  const actor = await requireRole(["SUPERADMIN"]);
+
+  try {
+    await deleteHoliday(id, actor);
+  } catch (error) {
+    console.error("deleteHolidayAction error:", error);
+  }
+
+  revalidatePath("/pengaturan");
 }
 
 export async function updateDefaultScheduleAction(

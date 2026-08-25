@@ -2,11 +2,14 @@ import { requireAuth } from "@/lib/auth/session";
 import {
   listAttendanceSchedules,
   getDefaultSchedule,
+  listHolidays,
 } from "@/lib/services/pengaturan-service";
 import { ChangePasswordForm } from "@/components/pengaturan/change-password-form";
 import { ThemeToggle } from "@/components/pengaturan/theme-toggle";
 import { ScheduleDayRow } from "@/components/pengaturan/schedule-day-row";
 import { DefaultScheduleForm } from "@/components/pengaturan/default-schedule-form";
+import { HolidayForm } from "@/components/pengaturan/holiday-form";
+import { HolidayList } from "@/components/pengaturan/holiday-list";
 import {
   Tabs,
   TabsList,
@@ -18,9 +21,13 @@ export default async function PengaturanPage() {
   const actor = await requireAuth();
   const isSuperAdmin = actor.role === "SUPERADMIN";
 
-  const [schedules, defaultSchedule] = isSuperAdmin
-    ? await Promise.all([listAttendanceSchedules(), getDefaultSchedule()])
-    : [null, null];
+  const [schedules, defaultSchedule, holidays] = isSuperAdmin
+    ? await Promise.all([
+        listAttendanceSchedules(),
+        getDefaultSchedule(),
+        listHolidays(),
+      ])
+    : [null, null, null];
 
   return (
     <div className="space-y-6">
@@ -37,6 +44,9 @@ export default async function PengaturanPage() {
           <TabsTrigger value="tampilan">Tampilan</TabsTrigger>
           {isSuperAdmin && (
             <TabsTrigger value="jadwal">Jadwal Absensi</TabsTrigger>
+          )}
+          {isSuperAdmin && (
+            <TabsTrigger value="libur">Hari Libur</TabsTrigger>
           )}
         </TabsList>
 
@@ -104,6 +114,24 @@ export default async function PengaturanPage() {
                 ))}
               </div>
             </div>
+          </TabsContent>
+        )}
+
+        {isSuperAdmin && holidays && (
+          <TabsContent value="libur" className="space-y-6 pt-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                Hari Libur
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Tanggal di luar Sabtu/Minggu yang ditandai libur di sini
+                tidak akan dihitung sebagai hari sekolah — guru tidak bisa
+                melakukan absensi, dan tanggal tersebut tidak masuk hitungan
+                laporan maupun auto-ALPHA.
+              </p>
+            </div>
+            <HolidayForm />
+            <HolidayList holidays={holidays} />
           </TabsContent>
         )}
       </Tabs>
