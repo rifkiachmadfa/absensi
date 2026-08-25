@@ -8,7 +8,7 @@
 // terasa satu keluarga desain, bukan halaman generik terpisah.
 "use client";
 
-import { useActionState, useState } from "react";
+import { use, useActionState, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -29,12 +29,30 @@ import { SCHOOL_LOGO_URL } from "@/lib/kartu-siswa/constants";
 
 const initialState: LoginState = {};
 
-export default function LoginPage() {
+export default function LoginPage({
+  searchParams,
+}: {
+  // Next.js 15/16: searchParams SELALU berupa Promise, termasuk saat
+  // di-pass ke Client Component seperti page.tsx ini -- bukan objek biasa.
+  // Diakses langsung (searchParams.notice) akan lolos secara diam-diam di
+  // beberapa kasus tapi memicu warning "must be unwrapped with React.use()"
+  // dan nilainya tidak pernah terbaca benar. use() di sini yang benar,
+  // BUKAN useState/useEffect, karena use() bisa membaca Promise yang
+  // dikirim sebagai prop dari boundary Server Component tanpa render tambahan.
+  searchParams: Promise<{ notice?: string }>;
+}) {
+  const resolvedSearchParams = use(searchParams);
   const [state, formAction, isPending] = useActionState(
     loginAction,
     initialState
   );
   const [showPassword, setShowPassword] = useState(false);
+
+  // Muncul kalau user datang dari /api/auth/session-repair (lihat
+  // lib/auth/session.ts: requireAuth) -- sesi lama sudah otomatis
+  // di-sign-out karena akunnya tidak/tidak lagi terdaftar aktif di
+  // sistem, supaya user tidak bingung tiba-tiba dilempar ke sini.
+  const sessionExpiredNotice = resolvedSearchParams?.notice === "session-expired";
 
   return (
     <div className="min-h-screen bg-[#F8FAFA]">
@@ -82,6 +100,13 @@ export default function LoginPage() {
               Masuk untuk melanjutkan ke dashboard
             </p>
           </div>
+
+          {sessionExpiredNotice && (
+            <div className="mt-6 flex items-start gap-2 rounded-[10px] border border-[#DCE7E9] bg-[#F1F5F5] p-3 text-[13px] text-[#48616A]">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[#71858C]" />
+              <span>Sesi Anda telah berakhir. Silakan masuk kembali.</span>
+            </div>
+          )}
 
           <form action={formAction} className="mt-6 space-y-4">
             <div className="space-y-1.5">

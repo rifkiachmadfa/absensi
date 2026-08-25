@@ -11,7 +11,24 @@ import { updateSession } from "@/lib/supabase/middleware";
 // CRON_SECRET di app/api/cron/auto-alpha/route.ts tidak pernah tereksekusi
 // dan job auto-ALPHA tidak akan pernah jalan. Proteksinya tetap ada, cuma
 // bentuknya CRON_SECRET (dicek di dalam route handler), bukan session login.
-const PUBLIC_ROUTE_PREFIXES = ["/login", "/cek-kehadiran", "/api/publik", "/api/cron"];
+//
+// "/api/auth/session-repair" WAJIB ada di sini juga: route ini dipanggil oleh
+// requireAuth() (lib/auth/session.ts) untuk membersihkan sesi Supabase Auth
+// yang "yatim" (login valid tapi tidak ada/tidak aktif di tabel User). Kalau
+// dikecualikan dari daftar ini, memanggilnya TANPA cookie sesi (mis. dipanggil
+// dua kali, atau sesi sudah kadung habis di request sebelumnya) akan
+// ditangkap balik oleh middleware sebagai "belum login" dan dilempar ke
+// /login?redirectTo=/api/auth/session-repair -- bikin alur muter lagi.
+// Route ini sendiri sudah aman diakses tanpa sesi (supabase.auth.signOut()
+// pada sesi yang sudah tidak ada adalah no-op), jadi tidak butuh proteksi
+// middleware sama sekali.
+const PUBLIC_ROUTE_PREFIXES = [
+  "/login",
+  "/cek-kehadiran",
+  "/api/publik",
+  "/api/cron",
+  "/api/auth/session-repair",
+];
 
 // Route yang harus EXACT MATCH "/" (root publik: dashboard info untuk orang
 // tua/umum). Tidak pakai startsWith supaya tidak ikut membuka /siswa, /kelas, dll.
