@@ -30,6 +30,14 @@ function getAudioContext(): AudioContext | null {
 // hasilnya datang) -- guru langsung dapat konfirmasi suara bahwa kartu
 // terbaca, walau hasil akhirnya (berhasil/sudah absen/dsb) baru menyusul
 // lewat toast + ScanQueuePanel.
+//
+// Karakter suara dibuat menyerupai scanner barcode/QR fisik pada umumnya
+// (mis. Zebra/Symbol/Honeywell): nada tunggal, PENDEK (~80ms), TINGGI
+// (~1900Hz), gelombang square (bukan sine) supaya terdengar tajam/elektronik
+// -- bukan nada musik yang lembut. Attack nyaris instan (tanpa fade-in)
+// supaya terasa "klik" tegas seperti bunyi scanner sungguhan, hanya bagian
+// akhir yang di-fade out sangat singkat agar tidak ada bunyi "pop/klik"
+// kasar saat berhenti.
 export function playScanBeep() {
   try {
     const ctx = getAudioContext();
@@ -43,17 +51,19 @@ export function playScanBeep() {
     }
 
     const now = ctx.currentTime;
-    const duration = 0.12;
+    const duration = 0.08;
+    const frequency = 1900;
 
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(880, now);
+    oscillator.type = "square";
+    oscillator.frequency.setValueAtTime(frequency, now);
 
-    // Envelope naik-turun singkat supaya tidak ada bunyi "klik" di awal/akhir.
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.15, now + 0.01);
+    // Attack nyaris instan (khas bunyi scanner elektronik), fade-out sangat
+    // singkat di akhir hanya untuk menghindari "klik" kasar saat berhenti.
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.setValueAtTime(0.2, now + duration - 0.01);
     gain.gain.linearRampToValueAtTime(0, now + duration);
 
     oscillator.connect(gain);
