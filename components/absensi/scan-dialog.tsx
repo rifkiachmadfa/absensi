@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
+import { playScanBeep } from "@/lib/audio/beep";
 import { STATUS_LABEL } from "@/lib/constants/attendance";
 import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
 
@@ -108,6 +109,7 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const handleDetected = useCallback(
     (qrToken: string) => {
       if (isInFlight(qrToken)) return; // request utk kartu ini masih berjalan
+      playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
       enqueue(qrToken, "Memindai kartu...", async () => {
         try {
           const res = await fetch("/api/absensi/scan", {
@@ -137,6 +139,7 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const absenkanManual = useCallback(
     (student: Student) => {
       if (isInFlight(student.id)) return;
+      playScanBeep();
       enqueue(student.id, student.name, async () => {
         try {
           const res = await fetch("/api/absensi/manual", {
