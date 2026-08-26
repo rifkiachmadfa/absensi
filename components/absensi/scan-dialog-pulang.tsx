@@ -13,15 +13,16 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { QrScanner } from "@/components/absensi/qr-scanner";
-import { ScanResult } from "@/components/absensi/scan-result";
+import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
+import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import type { AttendanceCheckOutResponse } from "@/lib/types/attendance";
 
-// Sama persis pola & tampilannya dengan scan-dialog.tsx (masuk), hanya
-// endpoint yang dipanggil berbeda (scan-pulang / manual-pulang) -- logic
-// tetap satu pintu lewat AttendanceService.checkOut() (Section 9).
-const FEEDBACK_DISPLAY_MS = 2000;
+// Sama persis pola & tampilannya dengan scan-dialog.tsx (masuk) -- lihat
+// catatan lengkap di sana (kamera tetap hidup, hasil diproses di background,
+// panel Riwayat + toast "menyusul"). Endpoint & tipe respons saja yang
+// berbeda; logic tetap satu pintu lewat AttendanceService.checkOut()
+// (Section 9).
 
 type Student = { id: string; name: string; nisn: string; className: string };
 
@@ -55,50 +56,66 @@ function notify(result: AttendanceCheckOutResponse) {
     toast.error(`${result.student.name} berstatus nonaktif`);
     return;
   }
+  if (result.type === "SCHOOL_CLOSED") {
+    toast.error("Hari ini libur, absensi tidak aktif.");
+    return;
+  }
   toast.error("QR Code tidak dikenali oleh sistem");
+}
+
+function classifyResult(result: AttendanceCheckOutResponse): {
+  status: ScanQueueStatus;
+  label: string;
+  detail?: string;
+} {
+  if (result.type === "SUCCESS") {
+    return { status: "success", label: result.student.name, detail: `Pulang · ${jamJakarta(result.time)}` };
+  }
+  if (result.type === "ALREADY_CHECKED_OUT") {
+    return { status: "warning", label: result.student.name, detail: "Sudah absen pulang" };
+  }
+  if (result.type === "NOT_CHECKED_IN") {
+    return { status: "error", label: result.student.name, detail: "Belum absen masuk" };
+  }
+  if (result.type === "STUDENT_INACTIVE") {
+    return { status: "error", label: result.student.name, detail: "Siswa nonaktif" };
+  }
+  if (result.type === "SCHOOL_CLOSED") {
+    return { status: "error", label: "Hari ini libur" };
+  }
+  return { status: "error", label: "QR tidak dikenali" };
 }
 
 export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState<"scanning" | "feedback">("scanning");
-  const [feedback, setFeedback] = useState<AttendanceCheckOutResponse | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-
   const [query, setQuery] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
 
-  const showFeedback = useCallback(
-    (result: AttendanceCheckOutResponse) => {
+  const { queue, enqueue, isInFlight, reset } = useScanQueue<AttendanceCheckOutResponse>({
+    classify: classifyResult,
+    onResult: (result) => {
       notify(result);
-      setFeedback(result);
-      setPhase("feedback");
       if (result.type === "SUCCESS") onSuccess();
-      setTimeout(() => {
-        setFeedback(null);
-        setPhase("scanning");
-      }, FEEDBACK_DISPLAY_MS);
     },
-    [onSuccess]
-  );
+  });
 
-  const submitScan = useCallback(
-    async (qrToken: string) => {
-      setIsProcessing(true);
-      try {
-        const res = await fetch("/api/absensi/scan-pulang", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qrToken }),
-        });
-        const data: AttendanceCheckOutResponse = await res.json();
-        showFeedback(data);
-      } catch {
-        showFeedback({ type: "STUDENT_NOT_FOUND" });
-      } finally {
-        setIsProcessing(false);
-      }
+  const handleDetected = useCallback(
+    (qrToken: string) => {
+      if (isInFlight(qrToken)) return;
+      enqueue(qrToken, "Memindai kartu...", async () => {
+        try {
+          const res = await fetch("/api/absensi/scan-pulang", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ qrToken }),
+          });
+          return (await res.json()) as AttendanceCheckOutResponse;
+        } catch {
+          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckOutResponse;
+        }
+      });
     },
-    [showFeedback]
+    [enqueue, isInFlight]
   );
 
   const searchStudents = useCallback(async (q: string) => {
@@ -110,33 +127,29 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
   }, []);
 
   const absenkanManual = useCallback(
-    async (studentId: string) => {
-      setIsProcessing(true);
-      try {
-        const res = await fetch("/api/absensi/manual-pulang", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId }),
-        });
-        const data: AttendanceCheckOutResponse = await res.json();
-        setStudents([]);
-        setQuery("");
-        showFeedback(data);
-      } catch {
-        showFeedback({ type: "STUDENT_NOT_FOUND" });
-      } finally {
-        setIsProcessing(false);
-      }
+    (student: Student) => {
+      if (isInFlight(student.id)) return;
+      enqueue(student.id, student.name, async () => {
+        try {
+          const res = await fetch("/api/absensi/manual-pulang", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ studentId: student.id }),
+          });
+          return (await res.json()) as AttendanceCheckOutResponse;
+        } catch {
+          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckOutResponse;
+        }
+      });
     },
-    [showFeedback]
+    [enqueue, isInFlight]
   );
 
   const resetDialogState = useCallback(() => {
-    setPhase("scanning");
-    setFeedback(null);
     setStudents([]);
     setQuery("");
-  }, []);
+    reset();
+  }, [reset]);
 
   return (
     <Dialog
@@ -146,50 +159,45 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
         if (!next) resetDialogState();
       }}
     >
-      <DialogTrigger render={<Button size="lg" variant="outline" />}>
-        Scan Pulang
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="lg" variant="outline" />}>Scan Pulang</DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Absensi Pulang</DialogTitle>
         </DialogHeader>
 
-        {phase === "feedback" && feedback && <ScanResult result={feedback} mode="pulang" />}
+        <Tabs defaultValue="scan">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="scan">Scan QR</TabsTrigger>
+            <TabsTrigger value="manual">Manual</TabsTrigger>
+          </TabsList>
 
-        {phase === "scanning" && (
-          <Tabs defaultValue="scan">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="scan">Scan QR</TabsTrigger>
-              <TabsTrigger value="manual">Manual</TabsTrigger>
-            </TabsList>
+          <TabsContent value="scan">
+            {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
+          </TabsContent>
 
-            <TabsContent value="scan">
-              {open && <QrScanner onDetected={submitScan} isProcessing={isProcessing} />}
-            </TabsContent>
-
-            <TabsContent value="manual">
-              <Input
-                placeholder="Cari nama / NISN / NIS..."
-                value={query}
-                onChange={(e) => searchStudents(e.target.value)}
-              />
-              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
-                {students.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="font-medium">{s.name}</p>
-                      <p className="text-sm text-muted-foreground">{s.className}</p>
-                    </div>
-                    <Button size="sm" disabled={isProcessing} onClick={() => absenkanManual(s.id)}>
-                      {isProcessing && <Spinner />}
-                      Pulangkan
-                    </Button>
+          <TabsContent value="manual">
+            <Input
+              placeholder="Cari nama / NISN / NIS..."
+              value={query}
+              onChange={(e) => searchStudents(e.target.value)}
+            />
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+              {students.map((s) => (
+                <div key={s.id} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium">{s.name}</p>
+                    <p className="text-sm text-muted-foreground">{s.className}</p>
                   </div>
-                ))}
-              </div>
-            </TabsContent>
-          </Tabs>
-        )}
+                  <Button size="sm" disabled={isInFlight(s.id)} onClick={() => absenkanManual(s)}>
+                    Pulangkan
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        <ScanQueuePanel items={queue} />
       </DialogContent>
     </Dialog>
   );
