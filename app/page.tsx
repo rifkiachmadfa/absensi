@@ -10,11 +10,13 @@ import { AttendanceService, getTodayDateOnly } from "@/lib/services/attendance-s
 import {
   getAttendanceTrend,
   getDisciplineMonthOptions,
+  getTopDisciplinedStudents,
   getLowestAttendanceStudents,
   getTopLateStudents,
   getLateRecapToday,
 } from "@/lib/services/report-service";
 import { AttendanceTrendChart } from "@/components/dashboard/attendance-trend-chart";
+import { DisciplineLeaderboard } from "@/components/dashboard/discipline-leaderboard";
 import { LowAttendanceLeaderboard } from "@/components/dashboard/low-attendance-leaderboard";
 import { LateLeaderboard } from "@/components/dashboard/late-leaderboard";
 import { LateRecapTodayCard } from "@/components/dashboard/late-recap-today-card";
@@ -65,10 +67,11 @@ function formatIndonesianDate(date: Date) {
 export default async function PublicHomePage() {
   const today = getTodayDateOnly();
 
-  // Bulan yang tersedia untuk kedua leaderboard di bawah -- sama persis
-  // dengan yang dipakai leaderboard kedisiplinan di /dashboard
-  // (getDisciplineMonthOptions), tanpa filter kelas karena halaman ini publik.
-  const lowAttendanceLateMonths = getDisciplineMonthOptions();
+  // Bulan yang tersedia untuk ketiga leaderboard di bawah (disiplin,
+  // kehadiran terendah, & paling sering terlambat) -- sama persis dengan
+  // yang dipakai di /dashboard (getDisciplineMonthOptions), tanpa filter
+  // kelas karena halaman ini publik.
+  const leaderboardMonths = getDisciplineMonthOptions();
 
   const [
     recap,
@@ -76,6 +79,7 @@ export default async function PublicHomePage() {
     recentActivity,
     dailyTrend,
     monthlyTrend,
+    disciplineLeaderboards,
     lowAttendanceLeaderboards,
     lateLeaderboards,
     lateRecapToday,
@@ -88,12 +92,17 @@ export default async function PublicHomePage() {
     getAttendanceTrend({ mode: "daily" }),
     getAttendanceTrend({ mode: "monthly" }),
     Promise.all(
-      lowAttendanceLateMonths.map((m) =>
+      leaderboardMonths.map((m) =>
+        getTopDisciplinedStudents({ month: m.value, limit: 5 })
+      )
+    ),
+    Promise.all(
+      leaderboardMonths.map((m) =>
         getLowestAttendanceStudents({ month: m.value, limit: 5 })
       )
     ),
     Promise.all(
-      lowAttendanceLateMonths.map((m) => getTopLateStudents({ month: m.value, limit: 5 }))
+      leaderboardMonths.map((m) => getTopLateStudents({ month: m.value, limit: 5 }))
     ),
     getLateRecapToday(),
   ]);
@@ -137,7 +146,11 @@ export default async function PublicHomePage() {
       <main className="relative mx-auto -mt-10 max-w-6xl space-y-6 px-4 pb-10 lg:-mt-12 lg:px-6">
         <PublicStudentSearch />
 
-               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+               {/* Terlambat sengaja TIDAK ada di grid ini -- dipindah &
+                   dikelompokkan bersama widget keterlambatan lain
+                   (LateRecapTodayCard, LateLeaderboard) di bagian paling
+                   bawah halaman, lihat komentar "Keterlambatan" di bawah. */}
+               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
           <PublicStatCard
             label="Total Murid"
             value={recap.totalSiswa}
@@ -170,12 +183,6 @@ export default async function PublicHomePage() {
             tone="danger"
           />
           <PublicStatCard
-            label="Terlambat"
-            value={recap.counts.TERLAMBAT}
-            icon={Clock}
-            tone="warning"
-          />
-          <PublicStatCard
             label="Tidak Diketahui"
             value={recap.counts.BELUM_ABSEN}
             icon={HelpCircle}
@@ -196,6 +203,28 @@ export default async function PublicHomePage() {
             <PublicRecentAttendance items={recentActivity} />
           </div>
         </div>
+
+        {/* Top 5 Paling Disiplin & Top 5 Kehadiran Terendah -- komponen
+            yang sama persis dengan /dashboard, tanpa filter kelas. */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <DisciplineLeaderboard leaderboards={disciplineLeaderboards} />
+          <LowAttendanceLeaderboard leaderboards={lowAttendanceLeaderboards} />
+        </div>
+
+        {/* Keterlambatan -- sesuai permintaan, semua widget terkait
+            keterlambatan (stat "Terlambat", rekap hari ini, & leaderboard
+            paling sering terlambat) dikelompokkan & diposisikan paling
+            bawah, terpisah dari ringkasan kehadiran umum di atas. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <PublicStatCard
+            label="Terlambat"
+            value={recap.counts.TERLAMBAT}
+            icon={Clock}
+            tone="warning"
+          />
+          <LateRecapTodayCard recap={lateRecapToday} />
+        </div>
+        <LateLeaderboard leaderboards={lateLeaderboards} />
 
         <footer className="pb-6 pt-2 text-center text-xs text-[#71858C]">
           SMK Yadika Tanjungsari Sumedang — Sistem Absensi Siswa
