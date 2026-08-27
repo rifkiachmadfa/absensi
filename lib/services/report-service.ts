@@ -1,5 +1,3 @@
-// lib/services/report-service.ts
-import "server-only";
 import { prisma } from "@/lib/prisma";
 import {
   AttendanceStatus,
@@ -603,7 +601,7 @@ const MONTHLY_TREND_POINTS = 6;
 function buildTrendCounts(
   counts: Omit<StatusCounts, "belumAbsen">,
   denom: number
-): Pick
+): Pick<
   AttendanceTrendPoint,
   "hadir" | "terlambat" | "sakit" | "izin" | "alpha" | "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha"
 > {
