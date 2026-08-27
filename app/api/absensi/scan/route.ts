@@ -1,6 +1,6 @@
 // app/api/absensi/scan/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { notifyPublicDashboardChanged } from "@/lib/cache/public-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { scanAttendanceSchema } from "@/lib/validations/attendance";
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     // dashboard publik "/" -- invalidate cache-nya hanya ketika record baru
     // benar-benar tersimpan.
     if (result.type === "SUCCESS") {
-      revalidatePath("/");
+      notifyPublicDashboardChanged();
     }
 
     return NextResponse.json(result, { status: statusCode });

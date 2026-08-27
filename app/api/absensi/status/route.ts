@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { notifyPublicDashboardChanged } from "@/lib/cache/public-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { AttendanceService } from "@/lib/services/attendance-service";
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     if (result.type === "FUTURE_DATE_NOT_ALLOWED") {
       return NextResponse.json({ message: "Tidak dapat mengubah status untuk tanggal yang akan datang." }, { status: 400 });
     }
-    revalidatePath("/");
+  notifyPublicDashboardChanged();
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
     console.error("Set status error:", err);

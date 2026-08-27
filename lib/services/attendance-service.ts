@@ -1,4 +1,5 @@
 // lib/services/attendance-service.ts
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
   Prisma,
@@ -883,64 +884,16 @@ export class AttendanceService {
   /**
    * Rekap harian yang benar: termasuk siswa yang belum punya record (BELUM_ABSEN).
    * Dipakai oleh dashboard (Section 7) dan laporan (Section 16-17).
+   *
+   * Dibungkus cache pendek (lihat fetchDailyRecap/getCachedDailyRecap di bawah
+   * class ini) karena dipanggil dari /dashboard DAN halaman publik "/", dan
+   * keduanya di-regenerate tiap ada aksi absensi (revalidatePath("/") --
+   * lihat lib/cache/public-dashboard.ts). Tanpa cache, jam masuk sekolah yang
+   * ramai bisa memicu query ini berkali-kali dalam hitungan detik dan
+   * menghabiskan connection pool (lib/prisma.ts: max 10 per instance).
    */
   static async getDailyRecap(params: { date: Date; classId?: string }): Promise<DailyRecap> {
-    const { date, classId } = params;
-
-    const students = await prisma.student.findMany({
-      where: {
-        status: StudentStatus.ACTIVE,
-        ...(classId ? { classId } : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        nisn: true,
-        class: { select: { id: true, name: true } },
-      },
-    });
-
-    const studentIds = students.map((s) => s.id);
-
-    const attendances = await prisma.attendance.findMany({
-      where: { date, studentId: { in: studentIds } },
-      select: { studentId: true, status: true, checkInAt: true },
-    });
-
-    const attendanceByStudent = new Map(attendances.map((a) => [a.studentId, a]));
-
-    const counts: Record<AttendanceStatus | "BELUM_ABSEN", number> = {
-      HADIR: 0,
-      TERLAMBAT: 0,
-      SAKIT: 0,
-      IZIN: 0,
-      DISPENSASI: 0,
-      ALPHA: 0,
-      BELUM_ABSEN: 0,
-    };
-
-    const belumAbsenList: { id: string; name: string; className: string }[] = [];
-
-    for (const student of students) {
-      const attendance = attendanceByStudent.get(student.id);
-      if (!attendance) {
-        counts.BELUM_ABSEN += 1;
-        belumAbsenList.push({
-          id: student.id,
-          name: student.name,
-          className: student.class.name,
-        });
-        continue;
-      }
-      counts[attendance.status] += 1;
-    }
-
-    return {
-      date: date.toISOString().slice(0, 10),
-      totalSiswa: students.length,
-      counts,
-      belumAbsen: belumAbsenList,
-    };
+    return getCachedDailyRecap(params.date.toISOString(), params.classId ?? null);
   }
 
   /**
@@ -948,100 +901,224 @@ export class AttendanceService {
    * Dipakai dashboard (Section 7 & 31) untuk "Statistik per kelas".
    * 2 query saja (kelas + attendance), grouping dilakukan di memori —
    * aman untuk skala ±500 siswa (Section 38).
+   *
+   * Sama seperti getDailyRecap: dibungkus cache pendek (lihat "Cache layer"
+   * di bawah class ini) karena dipanggil dari /dashboard DAN halaman publik.
    */
   static async getClassBreakdown(params: {
     date: Date;
     classId?: string;
   }): Promise<ClassBreakdown[]> {
-    const { date, classId } = params;
-
-    const classes = await prisma.class.findMany({
-      where: {
-        status: ClassStatus.ACTIVE,
-        ...(classId ? { id: classId } : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        students: {
-          where: { status: StudentStatus.ACTIVE },
-          select: { id: true },
-        },
-      },
-      orderBy: { name: "asc" },
-    });
-
-    const studentIds = classes.flatMap((k) => k.students.map((s) => s.id));
-
-    const attendances = await prisma.attendance.findMany({
-      where: { date, studentId: { in: studentIds } },
-      select: { studentId: true, status: true },
-    });
-    const statusByStudent = new Map(attendances.map((a) => [a.studentId, a.status]));
-
-    return classes.map((kelas) => {
-      let hadir = 0;
-      let terlambat = 0;
-      let belumAbsen = 0;
-      let lainnya = 0;
-
-      for (const s of kelas.students) {
-        const status = statusByStudent.get(s.id);
-        if (!status) belumAbsen += 1;
-        else if (status === AttendanceStatus.HADIR) hadir += 1;
-        else if (status === AttendanceStatus.TERLAMBAT) terlambat += 1;
-        else lainnya += 1;
-      }
-
-      const totalSiswa = kelas.students.length;
-      const persentaseHadir =
-        totalSiswa > 0 ? Math.round(((hadir + terlambat) / totalSiswa) * 100) : 0;
-
-      return {
-        classId: kelas.id,
-        className: kelas.name,
-        totalSiswa,
-        hadir,
-        terlambat,
-        belumAbsen,
-        lainnya,
-        persentaseHadir,
-      };
-    });
+    return getCachedClassBreakdown(params.date.toISOString(), params.classId ?? null);
   }
 
   /**
    * Aktivitas absensi terbaru pada satu tanggal (default: hari ini).
    * Dipakai dashboard (Section 7) untuk panel "Absensi Terbaru".
+   *
+   * Sama seperti getDailyRecap: dibungkus cache pendek (lihat "Cache layer"
+   * di bawah class ini) karena dipanggil dari /dashboard DAN halaman publik.
    */
   static async getRecentActivity(params: {
     date: Date;
     limit?: number;
     classId?: string;
   }): Promise<RecentAttendanceItem[]> {
-    const { date, limit = 8, classId } = params;
-
-    const attendances = await prisma.attendance.findMany({
-      where: {
-        date,
-        ...(classId ? { student: { classId } } : {}),
-      },
-      include: {
-        student: { select: { name: true, class: { select: { name: true } } } },
-        recordedBy: { select: { name: true } },
-      },
-      orderBy: { checkInAt: "desc" },
-      take: limit,
-    });
-
-    return attendances.map((a) => ({
-      id: a.id,
-      studentName: a.student.name,
-      className: a.student.class.name,
-      status: a.status,
-      method: a.method,
-      checkInAt: a.checkInAt.toISOString(),
-      recordedByName: a.recordedBy?.name ?? "-",
-    }));
+    return getCachedRecentActivity(
+      params.date.toISOString(),
+      params.limit ?? 8,
+      params.classId ?? null
+    );
   }
 }
+
+// ============================================================
+// Cache layer untuk statistik "hari ini" (Section 7 & 31)
+// ============================================================
+//
+// getDailyRecap/getClassBreakdown/getRecentActivity dipanggil dari DUA
+// halaman (/dashboard protected & "/" publik), dan KEDUANYA di-regenerate
+// tiap ada aksi absensi lewat revalidatePath("/") (lihat
+// lib/cache/public-dashboard.ts). Tanpa cache, jam masuk sekolah yang ramai
+// -- ratusan scan dalam hitungan menit -- bisa memicu ketiga query ini
+// berkali-kali per detik dan menghabiskan connection pool (lib/prisma.ts:
+// max 10 koneksi per instance, connectionTimeoutMillis pendek supaya GAGAL
+// CEPAT saat pool penuh -- itulah yang bikin web terasa "tidak bisa dibuka"
+// saat peak time).
+//
+// TODAY_STATS_CACHE_SECONDS sengaja pendek (bukan 5 menit seperti
+// leaderboard bulanan di report-service.ts) karena angka ini diklaim
+// "real-time" di UI. 10 detik adalah kompromi: tetap terasa segar untuk
+// guru/admin, tapi cukup untuk meredam burst request saat banyak scan
+// bersamaan dalam satu-dua detik. Client-side listener
+// (dashboard-realtime-listener.tsx / public-realtime-listener.tsx) sendiri
+// sudah throttle refresh ke 30 detik, jadi cache 10 detik di sini tidak
+// membuat UI terasa lebih basi dari itu.
+//
+// `date` sengaja diteruskan sebagai ISO string (bukan Date) ke fungsi yang
+// di-cache -- args unstable_cache di-serialize untuk membentuk cache key,
+// dan string lebih predictable/aman daripada Date object.
+const TODAY_STATS_CACHE_SECONDS = 10;
+
+async function fetchDailyRecap(dateISO: string, classId: string | null): Promise<DailyRecap> {
+  const date = new Date(dateISO);
+
+  const students = await prisma.student.findMany({
+    where: {
+      status: StudentStatus.ACTIVE,
+      ...(classId ? { classId } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      nisn: true,
+      class: { select: { id: true, name: true } },
+    },
+  });
+
+  const studentIds = students.map((s) => s.id);
+
+  const attendances = await prisma.attendance.findMany({
+    where: { date, studentId: { in: studentIds } },
+    select: { studentId: true, status: true, checkInAt: true },
+  });
+
+  const attendanceByStudent = new Map(attendances.map((a) => [a.studentId, a]));
+
+  const counts: Record<AttendanceStatus | "BELUM_ABSEN", number> = {
+    HADIR: 0,
+    TERLAMBAT: 0,
+    SAKIT: 0,
+    IZIN: 0,
+    DISPENSASI: 0,
+    ALPHA: 0,
+    BELUM_ABSEN: 0,
+  };
+
+  const belumAbsenList: { id: string; name: string; className: string }[] = [];
+
+  for (const student of students) {
+    const attendance = attendanceByStudent.get(student.id);
+    if (!attendance) {
+      counts.BELUM_ABSEN += 1;
+      belumAbsenList.push({
+        id: student.id,
+        name: student.name,
+        className: student.class.name,
+      });
+      continue;
+    }
+    counts[attendance.status] += 1;
+  }
+
+  return {
+    date: date.toISOString().slice(0, 10),
+    totalSiswa: students.length,
+    counts,
+    belumAbsen: belumAbsenList,
+  };
+}
+
+async function fetchClassBreakdown(
+  dateISO: string,
+  classId: string | null
+): Promise<ClassBreakdown[]> {
+  const date = new Date(dateISO);
+
+  const classes = await prisma.class.findMany({
+    where: {
+      status: ClassStatus.ACTIVE,
+      ...(classId ? { id: classId } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      students: {
+        where: { status: StudentStatus.ACTIVE },
+        select: { id: true },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  const studentIds = classes.flatMap((k) => k.students.map((s) => s.id));
+
+  const attendances = await prisma.attendance.findMany({
+    where: { date, studentId: { in: studentIds } },
+    select: { studentId: true, status: true },
+  });
+  const statusByStudent = new Map(attendances.map((a) => [a.studentId, a.status]));
+
+  return classes.map((kelas) => {
+    let hadir = 0;
+    let terlambat = 0;
+    let belumAbsen = 0;
+    let lainnya = 0;
+
+    for (const s of kelas.students) {
+      const status = statusByStudent.get(s.id);
+      if (!status) belumAbsen += 1;
+      else if (status === AttendanceStatus.HADIR) hadir += 1;
+      else if (status === AttendanceStatus.TERLAMBAT) terlambat += 1;
+      else lainnya += 1;
+    }
+
+    const totalSiswa = kelas.students.length;
+    const persentaseHadir =
+      totalSiswa > 0 ? Math.round(((hadir + terlambat) / totalSiswa) * 100) : 0;
+
+    return {
+      classId: kelas.id,
+      className: kelas.name,
+      totalSiswa,
+      hadir,
+      terlambat,
+      belumAbsen,
+      lainnya,
+      persentaseHadir,
+    };
+  });
+}
+
+async function fetchRecentActivity(
+  dateISO: string,
+  limit: number,
+  classId: string | null
+): Promise<RecentAttendanceItem[]> {
+  const date = new Date(dateISO);
+
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      date,
+      ...(classId ? { student: { classId } } : {}),
+    },
+    include: {
+      student: { select: { name: true, class: { select: { name: true } } } },
+      recordedBy: { select: { name: true } },
+    },
+    orderBy: { checkInAt: "desc" },
+    take: limit,
+  });
+
+  return attendances.map((a) => ({
+    id: a.id,
+    studentName: a.student.name,
+    className: a.student.class.name,
+    status: a.status,
+    method: a.method,
+    checkInAt: a.checkInAt.toISOString(),
+    recordedByName: a.recordedBy?.name ?? "-",
+  }));
+}
+
+const getCachedDailyRecap = unstable_cache(fetchDailyRecap, ["daily-recap"], {
+  revalidate: TODAY_STATS_CACHE_SECONDS,
+});
+
+const getCachedClassBreakdown = unstable_cache(fetchClassBreakdown, ["class-breakdown"], {
+  revalidate: TODAY_STATS_CACHE_SECONDS,
+});
+
+const getCachedRecentActivity = unstable_cache(fetchRecentActivity, ["recent-activity"], {
+  revalidate: TODAY_STATS_CACHE_SECONDS,
+});

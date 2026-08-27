@@ -1,6 +1,6 @@
 // app/api/absensi/manual/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { notifyPublicDashboardChanged } from "@/lib/cache/public-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { manualAttendanceSchema } from "@/lib/validations/attendance";
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     // Sama seperti QR scan: invalidate dashboard publik "/" hanya saat
     // record absensi baru benar-benar tersimpan.
     if (result.type === "SUCCESS") {
-      revalidatePath("/");
+      notifyPublicDashboardChanged();
     }
 
     return NextResponse.json(result, { status: statusCode });

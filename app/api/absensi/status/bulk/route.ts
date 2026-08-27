@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { notifyPublicDashboardChanged } from "@/lib/cache/public-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { bulkSetStatusSchema } from "@/lib/validations/attendance";
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       updatedById: user.id,
     });
 
-    revalidatePath("/");
+    notifyPublicDashboardChanged();
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
     console.error("Bulk set status error:", err);

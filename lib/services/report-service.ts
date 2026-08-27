@@ -1,4 +1,3 @@
-import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
@@ -621,11 +620,19 @@ function buildTrendCounts(
   };
 }
 
-export async function getAttendanceTrend(params: {
-  mode: TrendMode;
-  classId?: string;
-}): Promise<AttendanceTrendPayload> {
-  const { mode, classId } = params;
+// Grafik trend (harian & bulanan) dipanggil di /dashboard DAN halaman publik
+// "/" -- keduanya di-regenerate tiap ada aksi absensi lewat revalidatePath("/")
+// (lihat lib/cache/public-dashboard.ts). Tanpa cache, tiap regenerasi menembak
+// ulang query attendance penuh; saat jam masuk sekolah ramai ini bisa memicu
+// burst query bersamaan dan menghabiskan connection pool (max: 10 per
+// instance, lihat lib/prisma.ts). 20 detik cukup segar untuk sebuah chart
+// (bukan angka "live"), sekaligus meredam burst.
+const TREND_CACHE_SECONDS = 20;
+
+async function fetchAttendanceTrend(
+  mode: TrendMode,
+  classId: string | null
+): Promise<AttendanceTrendPayload> {
   const today = getTodayDateOnly();
 
   const students = await prisma.student.findMany({
@@ -731,6 +738,19 @@ export async function getAttendanceTrend(params: {
   });
 
   return { mode, points };
+}
+
+const getCachedAttendanceTrend = unstable_cache(
+  fetchAttendanceTrend,
+  ["attendance-trend"],
+  { revalidate: TREND_CACHE_SECONDS }
+);
+
+export async function getAttendanceTrend(params: {
+  mode: TrendMode;
+  classId?: string;
+}): Promise<AttendanceTrendPayload> {
+  return getCachedAttendanceTrend(params.mode, params.classId ?? null);
 }
 
 export async function getReportClassOptions() {
@@ -972,28 +992,12 @@ async function fetchMonthlyAttendanceBase(
 // saat banyak siswa scan berurutan & realtime listener memicu
 // router.refresh()) TIDAK menembak ulang query berat setiap kali; selama
 // window cache, semua render memakai hasil yang sama dari memory/cache Next.
-//
-// PENTING -- kenapa dibungkus React.cache() DI LUAR unstable_cache():
-// unstable_cache() TIDAK men-dedup pemanggilan konkuren dengan argumen yang
-// sama dalam satu render pass (beda dengan fetch() bawaan Next.js yang
-// otomatis di-memoize React). Ia baru menyimpan hasil SETELAH fungsi
-// resolve. getTopDisciplinedStudents, getLowestAttendanceStudents, dan
-// getTopLateStudents dipanggil BERSAMAAN lewat Promise.all di
-// dashboard/page.tsx untuk bulan yang sama -- tanpa React.cache() di sini,
-// saat cache miss (cold start / window revalidate baru habis) ketiganya
-// bisa memicu fetchMonthlyAttendanceBase 3x SECARA PARALEL sebelum salah
-// satu selesai mengisi cache, sehingga jumlah query balik mendekati kondisi
-// sebelum optimasi (~54 query). React.cache() memastikan pemanggilan
-// dengan argumen (month, classId) yang sama dalam satu render HANYA
-// menjalankan fungsi sekali, sisanya menunggu promise yang sama.
 const LEADERBOARD_CACHE_SECONDS = 5 * 60; // 5 menit
 
-const getCachedMonthlyAttendanceBase = cache(
-  unstable_cache(
-    fetchMonthlyAttendanceBase,
-    ["monthly-attendance-base"],
-    { revalidate: LEADERBOARD_CACHE_SECONDS }
-  )
+const getCachedMonthlyAttendanceBase = unstable_cache(
+  fetchMonthlyAttendanceBase,
+  ["monthly-attendance-base"],
+  { revalidate: LEADERBOARD_CACHE_SECONDS }
 );
 
 export async function getTopDisciplinedStudents(params: {
@@ -1236,15 +1240,9 @@ async function fetchLateRecapToday(
   };
 }
 
-// React.cache() di sini bersifat pencegahan (saat ini getLateRecapToday
-// hanya dipanggil sekali per halaman) -- lihat penjelasan lengkap di
-// getCachedMonthlyAttendanceBase di atas kenapa pola ini dibutuhkan begitu
-// ada pemanggil kedua dengan argumen sama dalam satu render.
-const getCachedLateRecapToday = cache(
-  unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
-    revalidate: LATE_RECAP_CACHE_SECONDS,
-  })
-);
+const getCachedLateRecapToday = unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
+  revalidate: LATE_RECAP_CACHE_SECONDS,
+});
 
 export async function getLateRecapToday(
   params: { classId?: string } = {}
