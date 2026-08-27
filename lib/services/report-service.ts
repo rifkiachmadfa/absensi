@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
@@ -971,12 +972,28 @@ async function fetchMonthlyAttendanceBase(
 // saat banyak siswa scan berurutan & realtime listener memicu
 // router.refresh()) TIDAK menembak ulang query berat setiap kali; selama
 // window cache, semua render memakai hasil yang sama dari memory/cache Next.
+//
+// PENTING -- kenapa dibungkus React.cache() DI LUAR unstable_cache():
+// unstable_cache() TIDAK men-dedup pemanggilan konkuren dengan argumen yang
+// sama dalam satu render pass (beda dengan fetch() bawaan Next.js yang
+// otomatis di-memoize React). Ia baru menyimpan hasil SETELAH fungsi
+// resolve. getTopDisciplinedStudents, getLowestAttendanceStudents, dan
+// getTopLateStudents dipanggil BERSAMAAN lewat Promise.all di
+// dashboard/page.tsx untuk bulan yang sama -- tanpa React.cache() di sini,
+// saat cache miss (cold start / window revalidate baru habis) ketiganya
+// bisa memicu fetchMonthlyAttendanceBase 3x SECARA PARALEL sebelum salah
+// satu selesai mengisi cache, sehingga jumlah query balik mendekati kondisi
+// sebelum optimasi (~54 query). React.cache() memastikan pemanggilan
+// dengan argumen (month, classId) yang sama dalam satu render HANYA
+// menjalankan fungsi sekali, sisanya menunggu promise yang sama.
 const LEADERBOARD_CACHE_SECONDS = 5 * 60; // 5 menit
 
-const getCachedMonthlyAttendanceBase = unstable_cache(
-  fetchMonthlyAttendanceBase,
-  ["monthly-attendance-base"],
-  { revalidate: LEADERBOARD_CACHE_SECONDS }
+const getCachedMonthlyAttendanceBase = cache(
+  unstable_cache(
+    fetchMonthlyAttendanceBase,
+    ["monthly-attendance-base"],
+    { revalidate: LEADERBOARD_CACHE_SECONDS }
+  )
 );
 
 export async function getTopDisciplinedStudents(params: {
@@ -1219,9 +1236,15 @@ async function fetchLateRecapToday(
   };
 }
 
-const getCachedLateRecapToday = unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
-  revalidate: LATE_RECAP_CACHE_SECONDS,
-});
+// React.cache() di sini bersifat pencegahan (saat ini getLateRecapToday
+// hanya dipanggil sekali per halaman) -- lihat penjelasan lengkap di
+// getCachedMonthlyAttendanceBase di atas kenapa pola ini dibutuhkan begitu
+// ada pemanggil kedua dengan argumen sama dalam satu render.
+const getCachedLateRecapToday = cache(
+  unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
+    revalidate: LATE_RECAP_CACHE_SECONDS,
+  })
+);
 
 export async function getLateRecapToday(
   params: { classId?: string } = {}
