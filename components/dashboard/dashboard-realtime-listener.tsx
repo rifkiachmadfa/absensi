@@ -17,28 +17,26 @@
 // publication `supabase_realtime` lewat migration
 // prisma/migrations/20260823120000_enable_realtime_attendance/migration.sql
 // (yang sama dipakai oleh halaman publik).
-import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useThrottledRefresh } from "@/hooks/use-throttled-refresh";
 
-// Debounce refresh: saat import Excel massal atau banyak scan beruntun,
-// banyak event bisa masuk dalam waktu singkat -- kita tidak mau memanggil
-// router.refresh() untuk tiap event satu-satu.
-const REFRESH_DEBOUNCE_MS = 800;
+// Throttle refresh: dashboard/page.tsx me-render ulang leaderboard bulanan
+// yang berat (lihat report-service.ts) setiap kali di-refresh. Saat jam
+// masuk sekolah, ratusan scan bisa masuk dalam hitungan menit -- kalau
+// setiap scan langsung memicu router.refresh(), setiap tab dashboard yang
+// terbuka akan menembak ulang query berat itu berkali-kali dalam waktu
+// singkat dan membanjiri koneksi database. Data dashboard cukup update
+// per 30 detik saja saat jam sibuk (leaderboard bulanan sendiri sudah
+// di-cache 5 menit, jadi refresh sesering ini tidak menambah beban DB
+// yang berarti).
+const REFRESH_INTERVAL_MS = 30_000;
 
 export function DashboardRealtimeListener() {
-  const router = useRouter();
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useThrottledRefresh(REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     const supabase = createClient();
-
-    const scheduleRefresh = () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        router.refresh();
-      }, REFRESH_DEBOUNCE_MS);
-    };
 
     const channel = supabase
       .channel("dashboard-attendance-changes")
@@ -52,10 +50,9 @@ export function DashboardRealtimeListener() {
       .subscribe();
 
     return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [scheduleRefresh]);
 
   return null;
 }

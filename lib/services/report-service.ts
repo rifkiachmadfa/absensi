@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
   AttendanceStatus,
@@ -7,7 +8,6 @@ import {
 import {
   getTodayDateOnly,
   isWeekendDate,
-  isHoliday,
   getHolidayDateSet,
 } from "@/lib/services/attendance-service";
 
@@ -601,7 +601,7 @@ const MONTHLY_TREND_POINTS = 6;
 function buildTrendCounts(
   counts: Omit<StatusCounts, "belumAbsen">,
   denom: number
-): Pick<
+): Pick
   AttendanceTrendPoint,
   "hadir" | "terlambat" | "sakit" | "izin" | "alpha" | "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha"
 > {
@@ -885,28 +885,58 @@ export function getDisciplineMonthOptions(
   return options; // index 0 = bulan berjalan, mundur ke belakang setelahnya
 }
 
-export async function getTopDisciplinedStudents(params: {
-  month: string; // "YYYY-MM"
-  classId?: string;
-  limit?: number;
-}): Promise<DisciplineLeaderboardPayload> {
-  const { month, classId } = params;
-  const limit = params.limit ?? 5;
+// Data mentah bulanan yang dipakai BERSAMA oleh ketiga leaderboard di bawah
+// (Disiplin, Kehadiran Terendah, Paling Sering Terlambat). Sebelumnya
+// masing-masing leaderboard melakukan query holiday + siswa + attendance
+// SENDIRI-SENDIRI untuk bulan yang sama -- 3 leaderboard x 6 bulan x 3 query
+// = ~54 query per render dashboard. Sekarang cukup 1x fetch per bulan,
+// dipakai bertiga.
+// PENTING: bentuk ini adalah yang disimpan oleh unstable_cache (lihat
+// getCachedMonthlyAttendanceBase di bawah), jadi WAJIB plain JSON-serializable
+// -- Map dan Date TIDAK dijamin selamat lewat serialisasi cache. `checkInAt`
+// karena itu disimpan sebagai ISO string, bukan Date; konsumen yang butuh
+// Map untuk lookup cepat membangunnya sendiri setelah membaca dari cache
+// (lihat toAttendanceMap()).
+type MonthlyAttendanceBase = {
+  schoolDays: number;
+  students: { id: string; name: string; nis: string; className: string }[];
+  attendances: { studentId: string; status: AttendanceStatus; checkInAt: string }[];
+};
 
+function toAttendanceMap(
+  attendances: MonthlyAttendanceBase["attendances"]
+): Map<string, { status: AttendanceStatus; checkInAt: Date }[]> {
+  const map = new Map<string, { status: AttendanceStatus; checkInAt: Date }[]>();
+  for (const a of attendances) {
+    const list = map.get(a.studentId) ?? [];
+    list.push({ status: a.status, checkInAt: new Date(a.checkInAt) });
+    map.set(a.studentId, list);
+  }
+  return map;
+}
+
+function parseMonthRange(month: string) {
   const [yearStr, monthStr] = month.split("-");
   const year = Number(yearStr);
   const monthNum = Number(monthStr);
   const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
   const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
   const today = getTodayDateOnly();
-  const monthLabel = formatPeriodLabel("monthly", periodStart);
+  return {
+    periodStart,
+    periodEnd: periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested,
+    isFuture: periodStart.getTime() > today.getTime(),
+    monthLabel: formatPeriodLabel("monthly", periodStart),
+  };
+}
 
-  // Bulan yang diminta sepenuhnya di masa depan -- belum mungkin ada data.
-  if (periodStart.getTime() > today.getTime()) {
-    return { month, monthLabel, schoolDays: 0, rows: [] };
-  }
+async function fetchMonthlyAttendanceBase(
+  month: string,
+  classId: string | null
+): Promise<MonthlyAttendanceBase | null> {
+  const { periodStart, periodEnd, isFuture } = parseMonthRange(month);
+  if (isFuture) return null;
 
-  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
   const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
   const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
 
@@ -914,39 +944,71 @@ export async function getTopDisciplinedStudents(params: {
     where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
     select: { id: true, name: true, nis: true, class: { select: { name: true } } },
   });
-  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
+  if (students.length === 0) {
+    return { schoolDays, students: [], attendances: [] };
+  }
 
   const studentIds = students.map((s) => s.id);
+  const attendances = await prisma.attendance.findMany({
+    where: { studentId: { in: studentIds }, date: { gte: periodStart, lte: periodEnd } },
+    select: { studentId: true, status: true, checkInAt: true },
+  });
+
+  return {
+    schoolDays,
+    students: students.map((s) => ({ id: s.id, name: s.name, nis: s.nis, className: s.class.name })),
+    attendances: attendances.map((a) => ({
+      studentId: a.studentId,
+      status: a.status,
+      checkInAt: a.checkInAt.toISOString(),
+    })),
+  };
+}
+
+// Leaderboard bulanan (Disiplin/Kehadiran Terendah/Terlambat) TIDAK perlu
+// real-time -- data historis "bulan ini" cukup akurat walau tertinggal
+// beberapa menit. Cache ini yang membuat refresh dashboard beruntun (mis.
+// saat banyak siswa scan berurutan & realtime listener memicu
+// router.refresh()) TIDAK menembak ulang query berat setiap kali; selama
+// window cache, semua render memakai hasil yang sama dari memory/cache Next.
+const LEADERBOARD_CACHE_SECONDS = 5 * 60; // 5 menit
+
+const getCachedMonthlyAttendanceBase = unstable_cache(
+  fetchMonthlyAttendanceBase,
+  ["monthly-attendance-base"],
+  { revalidate: LEADERBOARD_CACHE_SECONDS }
+);
+
+export async function getTopDisciplinedStudents(params: {
+  month: string; // "YYYY-MM"
+  classId?: string;
+  limit?: number;
+}): Promise<DisciplineLeaderboardPayload> {
+  const { month, classId, limit = 5 } = params;
+  const { isFuture, monthLabel } = parseMonthRange(month);
+  if (isFuture) return { month, monthLabel, schoolDays: 0, rows: [] };
+
+  const base = await getCachedMonthlyAttendanceBase(month, classId ?? null);
+  if (!base) return { month, monthLabel, schoolDays: 0, rows: [] };
+  const attendanceByStudent = toAttendanceMap(base.attendances);
 
   // Hanya HADIR/TERLAMBAT yang dihitung sebagai "masuk sekolah" -- SAKIT,
   // IZIN, DISPENSASI, ALPHA tidak menambah skor kedisiplinan (Section 10-11).
-  const attendances = await prisma.attendance.findMany({
-    where: {
-      studentId: { in: studentIds },
-      date: { gte: periodStart, lte: periodEnd },
-      status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT] },
-    },
-    select: { studentId: true, checkInAt: true },
-  });
-
-  const byStudent = new Map<string, { count: number; secondsSum: number }>();
-  for (const a of attendances) {
-    const entry = byStudent.get(a.studentId) ?? { count: 0, secondsSum: 0 };
-    entry.count += 1;
-    entry.secondsSum += jakartaSecondsOfDay(a.checkInAt);
-    byStudent.set(a.studentId, entry);
-  }
-
-  const rows = students
+  const rows = base.students
     .map((s) => {
-      const entry = byStudent.get(s.id);
-      const hadirCount = entry?.count ?? 0;
-      const avgSeconds = entry && entry.count > 0 ? entry.secondsSum / entry.count : null;
+      const records = (attendanceByStudent.get(s.id) ?? []).filter(
+        (a) => a.status === AttendanceStatus.HADIR || a.status === AttendanceStatus.TERLAMBAT
+      );
+      const hadirCount = records.length;
+      const avgSeconds =
+        hadirCount > 0
+          ? records.reduce((sum, a) => sum + jakartaSecondsOfDay(a.checkInAt), 0) / hadirCount
+          : null;
       return {
         studentId: s.id,
         name: s.name,
         nis: s.nis,
-        className: s.class.name,
+        className: s.className,
         hadirCount,
         avgCheckInLabel: avgSeconds === null ? "-" : secondsOfDayToLabel(avgSeconds),
         sortSeconds: avgSeconds ?? Number.MAX_SAFE_INTEGER,
@@ -960,7 +1022,7 @@ export async function getTopDisciplinedStudents(params: {
     .slice(0, limit)
     .map(({ sortSeconds: _sortSeconds, ...row }): DisciplineRow => row);
 
-  return { month, monthLabel, schoolDays, rows };
+  return { month, monthLabel, schoolDays: base.schoolDays, rows };
 }
 
 // ============================================================
@@ -978,61 +1040,31 @@ export async function getLowestAttendanceStudents(params: {
   classId?: string;
   limit?: number;
 }): Promise<LowAttendanceLeaderboardPayload> {
-  const { month, classId } = params;
-  const limit = params.limit ?? 5;
+  const { month, classId, limit = 5 } = params;
+  const { isFuture, monthLabel } = parseMonthRange(month);
+  if (isFuture) return { month, monthLabel, schoolDays: 0, rows: [] };
 
-  const [yearStr, monthStr] = month.split("-");
-  const year = Number(yearStr);
-  const monthNum = Number(monthStr);
-  const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
-  const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
-  const today = getTodayDateOnly();
-  const monthLabel = formatPeriodLabel("monthly", periodStart);
-
-  if (periodStart.getTime() > today.getTime()) {
-    return { month, monthLabel, schoolDays: 0, rows: [] };
+  const base = await getCachedMonthlyAttendanceBase(month, classId ?? null);
+  if (!base || base.schoolDays === 0) {
+    return { month, monthLabel, schoolDays: base?.schoolDays ?? 0, rows: [] };
   }
+  const attendanceByStudent = toAttendanceMap(base.attendances);
 
-  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
-  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
-  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
-  if (schoolDays === 0) return { month, monthLabel, schoolDays, rows: [] };
-
-  const students = await prisma.student.findMany({
-    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
-    select: { id: true, name: true, nis: true, class: { select: { name: true } } },
-  });
-  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
-
-  const studentIds = students.map((s) => s.id);
-
-  const attendances = await prisma.attendance.findMany({
-    where: { studentId: { in: studentIds }, date: { gte: periodStart, lte: periodEnd } },
-    select: { studentId: true, status: true },
-  });
-
-  const byStudent = new Map<string, { hadir: number; alpha: number }>();
-  for (const a of attendances) {
-    const entry = byStudent.get(a.studentId) ?? { hadir: 0, alpha: 0 };
-    if (a.status === AttendanceStatus.HADIR || a.status === AttendanceStatus.TERLAMBAT) {
-      entry.hadir += 1;
-    } else if (a.status === AttendanceStatus.ALPHA) {
-      entry.alpha += 1;
-    }
-    byStudent.set(a.studentId, entry);
-  }
-
-  const rows = students
+  const rows = base.students
     .map((s) => {
-      const entry = byStudent.get(s.id) ?? { hadir: 0, alpha: 0 };
+      const records = attendanceByStudent.get(s.id) ?? [];
+      const hadir = records.filter(
+        (a) => a.status === AttendanceStatus.HADIR || a.status === AttendanceStatus.TERLAMBAT
+      ).length;
+      const alpha = records.filter((a) => a.status === AttendanceStatus.ALPHA).length;
       return {
         studentId: s.id,
         name: s.name,
         nis: s.nis,
-        className: s.class.name,
-        hadirCount: entry.hadir,
-        alphaCount: entry.alpha,
-        persentaseKehadiran: Math.round((entry.hadir / schoolDays) * 100),
+        className: s.className,
+        hadirCount: hadir,
+        alphaCount: alpha,
+        persentaseKehadiran: Math.round((hadir / base.schoolDays) * 100),
       };
     })
     .sort((a, b) => {
@@ -1042,7 +1074,7 @@ export async function getLowestAttendanceStudents(params: {
     })
     .slice(0, limit);
 
-  return { month, monthLabel, schoolDays, rows };
+  return { month, monthLabel, schoolDays: base.schoolDays, rows };
 }
 
 // ============================================================
@@ -1059,60 +1091,29 @@ export async function getTopLateStudents(params: {
   classId?: string;
   limit?: number;
 }): Promise<LateLeaderboardPayload> {
-  const { month, classId } = params;
-  const limit = params.limit ?? 5;
+  const { month, classId, limit = 5 } = params;
+  const { isFuture, monthLabel } = parseMonthRange(month);
+  if (isFuture) return { month, monthLabel, schoolDays: 0, rows: [] };
 
-  const [yearStr, monthStr] = month.split("-");
-  const year = Number(yearStr);
-  const monthNum = Number(monthStr);
-  const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
-  const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
-  const today = getTodayDateOnly();
-  const monthLabel = formatPeriodLabel("monthly", periodStart);
+  const base = await getCachedMonthlyAttendanceBase(month, classId ?? null);
+  if (!base) return { month, monthLabel, schoolDays: 0, rows: [] };
+  const attendanceByStudent = toAttendanceMap(base.attendances);
 
-  if (periodStart.getTime() > today.getTime()) {
-    return { month, monthLabel, schoolDays: 0, rows: [] };
-  }
-
-  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
-  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
-  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
-
-  const students = await prisma.student.findMany({
-    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
-    select: { id: true, name: true, nis: true, class: { select: { name: true } } },
-  });
-  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
-
-  const studentIds = students.map((s) => s.id);
-
-  const attendances = await prisma.attendance.findMany({
-    where: {
-      studentId: { in: studentIds },
-      date: { gte: periodStart, lte: periodEnd },
-      status: AttendanceStatus.TERLAMBAT,
-    },
-    select: { studentId: true, checkInAt: true },
-  });
-
-  const byStudent = new Map<string, { count: number; secondsSum: number }>();
-  for (const a of attendances) {
-    const entry = byStudent.get(a.studentId) ?? { count: 0, secondsSum: 0 };
-    entry.count += 1;
-    entry.secondsSum += jakartaSecondsOfDay(a.checkInAt);
-    byStudent.set(a.studentId, entry);
-  }
-
-  const rows = students
+  const rows = base.students
     .map((s) => {
-      const entry = byStudent.get(s.id);
-      const terlambatCount = entry?.count ?? 0;
-      const avgSeconds = entry && entry.count > 0 ? entry.secondsSum / entry.count : null;
+      const records = (attendanceByStudent.get(s.id) ?? []).filter(
+        (a) => a.status === AttendanceStatus.TERLAMBAT
+      );
+      const terlambatCount = records.length;
+      const avgSeconds =
+        terlambatCount > 0
+          ? records.reduce((sum, a) => sum + jakartaSecondsOfDay(a.checkInAt), 0) / terlambatCount
+          : null;
       return {
         studentId: s.id,
         name: s.name,
         nis: s.nis,
-        className: s.class.name,
+        className: s.className,
         terlambatCount,
         avgCheckInLabel: avgSeconds === null ? "-" : secondsOfDayToLabel(avgSeconds),
         sortSeconds: avgSeconds ?? -1,
@@ -1126,7 +1127,7 @@ export async function getTopLateStudents(params: {
     .slice(0, limit)
     .map(({ sortSeconds: _sortSeconds, ...row }): LateStudentRow => row);
 
-  return { month, monthLabel, schoolDays, rows };
+  return { month, monthLabel, schoolDays: base.schoolDays, rows };
 }
 
 // ============================================================
@@ -1139,20 +1140,35 @@ export async function getTopLateStudents(params: {
 // perubahannya jadi tidak berarti. `compareLabel` tetap menampilkan
 // "kemarin" untuk kasus umum (Selasa-Jumat) di mana hari sekolah sebelumnya
 // memang benar-benar kemarin.
+//
+// Batch 1x getHolidayDateSet() untuk 14 hari ke belakang, bukan sampai 14x
+// isHoliday() sequential (tiap isHoliday() = 1 round-trip DB) seperti versi
+// sebelumnya -- N+1 kecil tapi tetap menambah beban saat dipanggil beruntun.
+// Hasilnya di-cache singkat (data "hari ini" perlu lebih segar daripada
+// leaderboard bulanan, tapi tetap tidak perlu dihitung ulang di SETIAP
+// refresh yang dipicu realtime listener).
 // ============================================================
 
-export async function getLateRecapToday(
-  params: { classId?: string } = {}
+const LATE_RECAP_CACHE_SECONDS = 60; // 1 menit -- cukup segar utk "hari ini"
+
+async function fetchLateRecapToday(
+  today: string, // ISO date-only, supaya hasil unstable_cache tidak "menempel" ke hari kemarin lewat tengah malam
+  classId: string | null
 ): Promise<LateRecapToday> {
-  const { classId } = params;
-  const today = getTodayDateOnly();
-  const isSchoolDayToday = !isWeekendDate(today) && !(await isHoliday(today));
+  const todayDate = new Date(`${today}T00:00:00.000Z`);
+  const rangeStart = new Date(todayDate);
+  rangeStart.setUTCDate(rangeStart.getUTCDate() - 14);
+
+  const holidaySet = await getHolidayDateSet(rangeStart, todayDate);
+  const isNonSchoolDay = (d: Date) => isWeekendDate(d) || holidaySet.has(toISODateOnly(d));
+
+  const isSchoolDayToday = !isNonSchoolDay(todayDate);
 
   let compareDate: Date | null = null;
-  const cursor = new Date(today);
+  const cursor = new Date(todayDate);
   for (let i = 0; i < 14; i++) {
     cursor.setUTCDate(cursor.getUTCDate() - 1);
-    if (!isWeekendDate(cursor) && !(await isHoliday(cursor))) {
+    if (!isNonSchoolDay(cursor)) {
       compareDate = new Date(cursor);
       break;
     }
@@ -1162,7 +1178,7 @@ export async function getLateRecapToday(
 
   const [todayCount, compareCount] = await Promise.all([
     prisma.attendance.count({
-      where: { date: today, status: AttendanceStatus.TERLAMBAT, ...classFilter },
+      where: { date: todayDate, status: AttendanceStatus.TERLAMBAT, ...classFilter },
     }),
     compareDate
       ? prisma.attendance.count({
@@ -1183,7 +1199,7 @@ export async function getLateRecapToday(
     direction = percentChange > 0 ? "up" : percentChange < 0 ? "down" : "flat";
   }
 
-  const yesterday = new Date(today);
+  const yesterday = new Date(todayDate);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   const compareLabel = !compareDate
     ? "-"
@@ -1192,7 +1208,7 @@ export async function getLateRecapToday(
       : new Intl.DateTimeFormat("id-ID", { weekday: "long", timeZone: "UTC" }).format(compareDate);
 
   return {
-    date: toISODateOnly(today),
+    date: toISODateOnly(todayDate),
     isSchoolDay: isSchoolDayToday,
     todayCount,
     compareDate: compareDate ? toISODateOnly(compareDate) : null,
@@ -1201,4 +1217,15 @@ export async function getLateRecapToday(
     percentChange,
     direction,
   };
+}
+
+const getCachedLateRecapToday = unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
+  revalidate: LATE_RECAP_CACHE_SECONDS,
+});
+
+export async function getLateRecapToday(
+  params: { classId?: string } = {}
+): Promise<LateRecapToday> {
+  const today = toISODateOnly(getTodayDateOnly());
+  return getCachedLateRecapToday(today, params.classId ?? null);
 }

@@ -15,28 +15,21 @@
 // prisma/migrations/<timestamp>_enable_realtime_attendance/migration.sql
 // dan pastikan Realtime diaktifkan untuk tabel tsb di Supabase Dashboard
 // (Database > Replication) jika project sudah lama/tidak lewat migration.
-import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useThrottledRefresh } from "@/hooks/use-throttled-refresh";
 
-// Debounce refresh: saat import Excel massal, banyak INSERT bisa masuk
-// beruntun dalam waktu singkat -- kita tidak mau memanggil router.refresh()
-// untuk tiap baris.
-const REFRESH_DEBOUNCE_MS = 800;
+// Throttle refresh -- lihat komentar di dashboard-realtime-listener.tsx.
+// Halaman ini bahkan lebih perlu dilindungi: publik, tanpa login, jadi bisa
+// dibuka & ditinggal terbuka oleh siapa saja (mis. layar TV di lobi
+// sekolah), dan sekarang ikut merender leaderboard bulanan yang berat.
+const REFRESH_INTERVAL_MS = 30_000;
 
 export function PublicRealtimeListener() {
-  const router = useRouter();
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useThrottledRefresh(REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     const supabase = createClient();
-
-    const scheduleRefresh = () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        router.refresh();
-      }, REFRESH_DEBOUNCE_MS);
-    };
 
     const channel = supabase
       .channel("public-attendance-changes")
@@ -50,10 +43,9 @@ export function PublicRealtimeListener() {
       .subscribe();
 
     return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [scheduleRefresh]);
 
   return null;
 }
