@@ -9,6 +9,7 @@ import {
 import {
   getTodayDateOnly,
   isWeekendDate,
+  isHoliday,
   getHolidayDateSet,
 } from "@/lib/services/attendance-service";
 
@@ -157,6 +158,63 @@ export type DisciplineLeaderboardPayload = {
   monthLabel: string; // "Agustus 2026"
   schoolDays: number; // total hari sekolah (Senin-Jumat) pada bulan ini yang SUDAH LEWAT
   rows: DisciplineRow[]; // sudah diurutkan & dipotong ke `limit` (default 5)
+};
+
+// Dipakai oleh kartu "Top 5 Kehadiran Terendah" di dashboard -- kebalikan
+// dari DisciplineLeaderboard: bulan yang sama, tapi diurutkan ASC dari
+// `hadirCount` PALING SEDIKIT. `alphaCount` disertakan sebagai konteks
+// tambahan (bukan penentu utama, hanya tie-breaker), karena siswa yang tidak
+// scan default-nya BELUM_ABSEN, bukan otomatis ALPHA (Section 11).
+export type LowAttendanceRow = {
+  studentId: string;
+  name: string;
+  nis: string;
+  className: string;
+  hadirCount: number; // jumlah hari HADIR/TERLAMBAT (masuk sekolah) bulan ini
+  alphaCount: number; // jumlah hari berstatus ALPHA bulan ini
+  persentaseKehadiran: number; // hadirCount / schoolDays * 100, dibulatkan
+};
+
+export type LowAttendanceLeaderboardPayload = {
+  month: string;
+  monthLabel: string;
+  schoolDays: number;
+  rows: LowAttendanceRow[]; // sudah diurutkan & dipotong ke `limit` (default 5)
+};
+
+// Dipakai oleh kartu "Top 5 Siswa Paling Sering Terlambat" di dashboard.
+// Penilaian PER BULAN, diurutkan dari jumlah TERLAMBAT terbanyak; jika sama,
+// rata-rata jam check-in PALING SIANG (paling parah) yang menang.
+export type LateStudentRow = {
+  studentId: string;
+  name: string;
+  nis: string;
+  className: string;
+  terlambatCount: number; // jumlah hari berstatus TERLAMBAT bulan ini
+  avgCheckInLabel: string; // rata-rata jam check-in SAAT terlambat, "HH:mm" (Asia/Jakarta)
+};
+
+export type LateLeaderboardPayload = {
+  month: string;
+  monthLabel: string;
+  schoolDays: number;
+  rows: LateStudentRow[]; // sudah diurutkan & dipotong ke `limit` (default 5)
+};
+
+// Dipakai oleh widget "Rekap Keterlambatan Hari Ini" di dashboard: jumlah
+// TERLAMBAT hari ini dibanding HARI SEKOLAH SEBELUMNYA (bukan sekadar
+// "kemarin" kalender -- kalau hari ini Senin, pembandingnya Jumat, bukan
+// Minggu yang pasti 0 & bikin persentase menyesatkan). `compareLabel` akan
+// bernilai "kemarin" jika hari sekolah sebelumnya itu memang benar kemarin.
+export type LateRecapToday = {
+  date: string; // YYYY-MM-DD, hari ini
+  isSchoolDay: boolean; // apakah hari ini hari sekolah (bukan weekend/libur)
+  todayCount: number; // jumlah TERLAMBAT hari ini
+  compareDate: string | null; // YYYY-MM-DD hari sekolah sebelumnya, null jika tidak ditemukan dalam 14 hari terakhir
+  compareLabel: string; // "kemarin" atau nama hari (mis. "Jumat")
+  compareCount: number | null; // jumlah TERLAMBAT pada compareDate
+  percentChange: number | null; // null jika compareCount 0 (tidak terhitung) atau compareDate null
+  direction: "up" | "down" | "flat" | "new" | "none";
 };
 
 export type MonthOption = { value: string; label: string };
@@ -545,7 +603,7 @@ const MONTHLY_TREND_POINTS = 6;
 function buildTrendCounts(
   counts: Omit<StatusCounts, "belumAbsen">,
   denom: number
-): Pick<
+): Pick
   AttendanceTrendPoint,
   "hadir" | "terlambat" | "sakit" | "izin" | "alpha" | "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha"
 > {
@@ -905,4 +963,244 @@ export async function getTopDisciplinedStudents(params: {
     .map(({ sortSeconds: _sortSeconds, ...row }): DisciplineRow => row);
 
   return { month, monthLabel, schoolDays, rows };
+}
+
+// ============================================================
+// Top 5 Kehadiran Terendah -- kebalikan getTopDisciplinedStudents():
+//   1. Jumlah hari HADIR/TERLAMBAT (masuk sekolah) bulan ini -- ASC
+//   2. Jumlah ALPHA bulan ini -- DESC (tie-breaker, konteks tambahan)
+//   3. Nama -- alfabetis (tie-breaker terakhir, supaya urutan stabil)
+// Siswa TETAP masuk peringkat meski hadirCount = 0 (justru itu yang paling
+// relevan untuk widget ini), beda dengan getTopDisciplinedStudents() yang
+// mengecualikan siswa tanpa kehadiran sama sekali.
+// ============================================================
+
+export async function getLowestAttendanceStudents(params: {
+  month: string; // "YYYY-MM"
+  classId?: string;
+  limit?: number;
+}): Promise<LowAttendanceLeaderboardPayload> {
+  const { month, classId } = params;
+  const limit = params.limit ?? 5;
+
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
+  const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
+  const today = getTodayDateOnly();
+  const monthLabel = formatPeriodLabel("monthly", periodStart);
+
+  if (periodStart.getTime() > today.getTime()) {
+    return { month, monthLabel, schoolDays: 0, rows: [] };
+  }
+
+  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
+  if (schoolDays === 0) return { month, monthLabel, schoolDays, rows: [] };
+
+  const students = await prisma.student.findMany({
+    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
+    select: { id: true, name: true, nis: true, class: { select: { name: true } } },
+  });
+  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
+
+  const studentIds = students.map((s) => s.id);
+
+  const attendances = await prisma.attendance.findMany({
+    where: { studentId: { in: studentIds }, date: { gte: periodStart, lte: periodEnd } },
+    select: { studentId: true, status: true },
+  });
+
+  const byStudent = new Map<string, { hadir: number; alpha: number }>();
+  for (const a of attendances) {
+    const entry = byStudent.get(a.studentId) ?? { hadir: 0, alpha: 0 };
+    if (a.status === AttendanceStatus.HADIR || a.status === AttendanceStatus.TERLAMBAT) {
+      entry.hadir += 1;
+    } else if (a.status === AttendanceStatus.ALPHA) {
+      entry.alpha += 1;
+    }
+    byStudent.set(a.studentId, entry);
+  }
+
+  const rows = students
+    .map((s) => {
+      const entry = byStudent.get(s.id) ?? { hadir: 0, alpha: 0 };
+      return {
+        studentId: s.id,
+        name: s.name,
+        nis: s.nis,
+        className: s.class.name,
+        hadirCount: entry.hadir,
+        alphaCount: entry.alpha,
+        persentaseKehadiran: Math.round((entry.hadir / schoolDays) * 100),
+      };
+    })
+    .sort((a, b) => {
+      if (a.hadirCount !== b.hadirCount) return a.hadirCount - b.hadirCount; // (1) hadirCount ASC
+      if (b.alphaCount !== a.alphaCount) return b.alphaCount - a.alphaCount; // (2) alphaCount DESC
+      return a.name.localeCompare(b.name); // (3) alfabetis
+    })
+    .slice(0, limit);
+
+  return { month, monthLabel, schoolDays, rows };
+}
+
+// ============================================================
+// Top 5 Siswa Paling Sering Terlambat -- sama seperti
+// getTopDisciplinedStudents() tapi HANYA menghitung status TERLAMBAT:
+//   1. Jumlah TERLAMBAT bulan ini -- DESC
+//   2. Rata-rata jam check-in (Asia/Jakarta) -- DESC (paling siang = paling
+//      parah yang menang, kebalikan dari leaderboard kedisiplinan)
+// Siswa tanpa keterlambatan sama sekali pada bulan itu tidak masuk peringkat.
+// ============================================================
+
+export async function getTopLateStudents(params: {
+  month: string; // "YYYY-MM"
+  classId?: string;
+  limit?: number;
+}): Promise<LateLeaderboardPayload> {
+  const { month, classId } = params;
+  const limit = params.limit ?? 5;
+
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  const periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
+  const periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
+  const today = getTodayDateOnly();
+  const monthLabel = formatPeriodLabel("monthly", periodStart);
+
+  if (periodStart.getTime() > today.getTime()) {
+    return { month, monthLabel, schoolDays: 0, rows: [] };
+  }
+
+  const periodEnd = periodEndRequested.getTime() > today.getTime() ? today : periodEndRequested;
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
+
+  const students = await prisma.student.findMany({
+    where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
+    select: { id: true, name: true, nis: true, class: { select: { name: true } } },
+  });
+  if (students.length === 0) return { month, monthLabel, schoolDays, rows: [] };
+
+  const studentIds = students.map((s) => s.id);
+
+  const attendances = await prisma.attendance.findMany({
+    where: {
+      studentId: { in: studentIds },
+      date: { gte: periodStart, lte: periodEnd },
+      status: AttendanceStatus.TERLAMBAT,
+    },
+    select: { studentId: true, checkInAt: true },
+  });
+
+  const byStudent = new Map<string, { count: number; secondsSum: number }>();
+  for (const a of attendances) {
+    const entry = byStudent.get(a.studentId) ?? { count: 0, secondsSum: 0 };
+    entry.count += 1;
+    entry.secondsSum += jakartaSecondsOfDay(a.checkInAt);
+    byStudent.set(a.studentId, entry);
+  }
+
+  const rows = students
+    .map((s) => {
+      const entry = byStudent.get(s.id);
+      const terlambatCount = entry?.count ?? 0;
+      const avgSeconds = entry && entry.count > 0 ? entry.secondsSum / entry.count : null;
+      return {
+        studentId: s.id,
+        name: s.name,
+        nis: s.nis,
+        className: s.class.name,
+        terlambatCount,
+        avgCheckInLabel: avgSeconds === null ? "-" : secondsOfDayToLabel(avgSeconds),
+        sortSeconds: avgSeconds ?? -1,
+      };
+    })
+    .filter((r) => r.terlambatCount > 0) // siswa tanpa keterlambatan bulan ini tidak masuk peringkat
+    .sort((a, b) => {
+      if (b.terlambatCount !== a.terlambatCount) return b.terlambatCount - a.terlambatCount; // (1) jumlah terlambat DESC
+      return b.sortSeconds - a.sortSeconds; // (2) rata-rata jam check-in DESC (paling siang menang)
+    })
+    .slice(0, limit)
+    .map(({ sortSeconds: _sortSeconds, ...row }): LateStudentRow => row);
+
+  return { month, monthLabel, schoolDays, rows };
+}
+
+// ============================================================
+// Rekap Keterlambatan Hari Ini -- membandingkan jumlah TERLAMBAT hari ini
+// dengan HARI SEKOLAH SEBELUMNYA (mundur maksimal 14 hari kalender, skip
+// weekend & Holiday -- definisi yang SAMA dengan isNonSchoolDay() di
+// attendance-service.ts, JANGAN buat definisi "hari sekolah" duplikat).
+// Kenapa bukan sekadar "kemarin" kalender: kalau hari ini Senin, "kemarin"
+// (Minggu) pasti 0 keterlambatan karena sekolah libur -- persentase
+// perubahannya jadi tidak berarti. `compareLabel` tetap menampilkan
+// "kemarin" untuk kasus umum (Selasa-Jumat) di mana hari sekolah sebelumnya
+// memang benar-benar kemarin.
+// ============================================================
+
+export async function getLateRecapToday(
+  params: { classId?: string } = {}
+): Promise<LateRecapToday> {
+  const { classId } = params;
+  const today = getTodayDateOnly();
+  const isSchoolDayToday = !isWeekendDate(today) && !(await isHoliday(today));
+
+  let compareDate: Date | null = null;
+  const cursor = new Date(today);
+  for (let i = 0; i < 14; i++) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    if (!isWeekendDate(cursor) && !(await isHoliday(cursor))) {
+      compareDate = new Date(cursor);
+      break;
+    }
+  }
+
+  const classFilter = classId ? { student: { classId } } : {};
+
+  const [todayCount, compareCount] = await Promise.all([
+    prisma.attendance.count({
+      where: { date: today, status: AttendanceStatus.TERLAMBAT, ...classFilter },
+    }),
+    compareDate
+      ? prisma.attendance.count({
+          where: { date: compareDate, status: AttendanceStatus.TERLAMBAT, ...classFilter },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  let percentChange: number | null = null;
+  let direction: LateRecapToday["direction"] = "none";
+
+  if (compareCount === null) {
+    direction = "none";
+  } else if (compareCount === 0) {
+    direction = todayCount > 0 ? "new" : "flat";
+  } else {
+    percentChange = Math.round(((todayCount - compareCount) / compareCount) * 100);
+    direction = percentChange > 0 ? "up" : percentChange < 0 ? "down" : "flat";
+  }
+
+  const yesterday = new Date(today);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const compareLabel = !compareDate
+    ? "-"
+    : toISODateOnly(compareDate) === toISODateOnly(yesterday)
+      ? "kemarin"
+      : new Intl.DateTimeFormat("id-ID", { weekday: "long", timeZone: "UTC" }).format(compareDate);
+
+  return {
+    date: toISODateOnly(today),
+    isSchoolDay: isSchoolDayToday,
+    todayCount,
+    compareDate: compareDate ? toISODateOnly(compareDate) : null,
+    compareLabel,
+    compareCount,
+    percentChange,
+    direction,
+  };
 }

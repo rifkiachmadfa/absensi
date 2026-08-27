@@ -7,8 +7,17 @@
 // Dashboard KHUSUS ADMIN/GURU/WALI KELAS yang lama (dengan aksi) sekarang
 // ada di /dashboard (app/(protected)/dashboard/page.tsx), bukan lagi di "/".
 import { AttendanceService, getTodayDateOnly } from "@/lib/services/attendance-service";
-import { getAttendanceTrend } from "@/lib/services/report-service";
+import {
+  getAttendanceTrend,
+  getDisciplineMonthOptions,
+  getLowestAttendanceStudents,
+  getTopLateStudents,
+  getLateRecapToday,
+} from "@/lib/services/report-service";
 import { AttendanceTrendChart } from "@/components/dashboard/attendance-trend-chart";
+import { LowAttendanceLeaderboard } from "@/components/dashboard/low-attendance-leaderboard";
+import { LateLeaderboard } from "@/components/dashboard/late-leaderboard";
+import { LateRecapTodayCard } from "@/components/dashboard/late-recap-today-card";
 import { PublicStatCard } from "@/components/publik/public-stat-card";
 import { PublicClassStats } from "@/components/publik/public-class-stats";
 import { PublicRecentAttendance } from "@/components/publik/public-recent-attendance";
@@ -56,16 +65,38 @@ function formatIndonesianDate(date: Date) {
 export default async function PublicHomePage() {
   const today = getTodayDateOnly();
 
-  const [recap, classBreakdown, recentActivity, dailyTrend, monthlyTrend] =
-    await Promise.all([
-      AttendanceService.getDailyRecap({ date: today }),
-      AttendanceService.getClassBreakdown({ date: today }),
-      AttendanceService.getRecentActivity({ date: today, limit: 8 }),
-      // Grafik kehadiran total -- reuse persis service & komponen chart.js
-      // yang sama dengan /dashboard (Section 26: satu sumber logic).
-      getAttendanceTrend({ mode: "daily" }),
-      getAttendanceTrend({ mode: "monthly" }),
-    ]);
+  // Bulan yang tersedia untuk kedua leaderboard di bawah -- sama persis
+  // dengan yang dipakai leaderboard kedisiplinan di /dashboard
+  // (getDisciplineMonthOptions), tanpa filter kelas karena halaman ini publik.
+  const lowAttendanceLateMonths = getDisciplineMonthOptions();
+
+  const [
+    recap,
+    classBreakdown,
+    recentActivity,
+    dailyTrend,
+    monthlyTrend,
+    lowAttendanceLeaderboards,
+    lateLeaderboards,
+    lateRecapToday,
+  ] = await Promise.all([
+    AttendanceService.getDailyRecap({ date: today }),
+    AttendanceService.getClassBreakdown({ date: today }),
+    AttendanceService.getRecentActivity({ date: today, limit: 8 }),
+    // Grafik kehadiran total -- reuse persis service & komponen chart.js
+    // yang sama dengan /dashboard (Section 26: satu sumber logic).
+    getAttendanceTrend({ mode: "daily" }),
+    getAttendanceTrend({ mode: "monthly" }),
+    Promise.all(
+      lowAttendanceLateMonths.map((m) =>
+        getLowestAttendanceStudents({ month: m.value, limit: 5 })
+      )
+    ),
+    Promise.all(
+      lowAttendanceLateMonths.map((m) => getTopLateStudents({ month: m.value, limit: 5 }))
+    ),
+    getLateRecapToday(),
+  ]);
 
   const hadirTotal = recap.counts.HADIR + recap.counts.TERLAMBAT;
   const persentaseKehadiran =

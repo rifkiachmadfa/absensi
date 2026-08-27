@@ -9,6 +9,9 @@ import {
   getClassAttendanceTrend,
   getDisciplineMonthOptions,
   getTopDisciplinedStudents,
+  getLowestAttendanceStudents,
+  getTopLateStudents,
+  getLateRecapToday,
 } from "@/lib/services/report-service";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { RecentAttendance } from "@/components/dashboard/recent-attendance";
@@ -17,6 +20,10 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { AttendanceTrendChart } from "@/components/dashboard/attendance-trend-chart";
 import { ClassComparisonTrendChart } from "@/components/dashboard/class-comparison-trend-chart";
 import { DisciplineLeaderboard } from "@/components/dashboard/discipline-leaderboard";
+import { LowAttendanceLeaderboard } from "@/components/dashboard/low-attendance-leaderboard";
+import { LateLeaderboard } from "@/components/dashboard/late-leaderboard";
+import { LateRecapTodayCard } from "@/components/dashboard/late-recap-today-card";
+import { DashboardRealtimeListener } from "@/components/dashboard/dashboard-realtime-listener";
 import { Users, CheckCircle2, Clock, UserX } from "lucide-react";
 
 const TIMEZONE = "Asia/Jakarta";
@@ -52,20 +59,41 @@ export default async function DashboardPage() {
   // getDisciplineMonthOptions di report-service.ts).
   const disciplineMonths = getDisciplineMonthOptions();
 
-  const [recap, classBreakdown, recentActivity, dailyTrend, monthlyTrend, classTrend, disciplineLeaderboards] =
-    await Promise.all([
-      AttendanceService.getDailyRecap({ date: today, classId }),
-      AttendanceService.getClassBreakdown({ date: today, classId }),
-      AttendanceService.getRecentActivity({ date: today, classId, limit: 8 }),
-      getAttendanceTrend({ mode: "daily", classId }),
-      getAttendanceTrend({ mode: "monthly", classId }),
-      getClassAttendanceTrend({ classId }),
-      Promise.all(
-        disciplineMonths.map((m) =>
-          getTopDisciplinedStudents({ month: m.value, classId, limit: 5 })
-        )
-      ),
-    ]);
+  const [
+    recap,
+    classBreakdown,
+    recentActivity,
+    dailyTrend,
+    monthlyTrend,
+    classTrend,
+    disciplineLeaderboards,
+    lowAttendanceLeaderboards,
+    lateLeaderboards,
+    lateRecapToday,
+  ] = await Promise.all([
+    AttendanceService.getDailyRecap({ date: today, classId }),
+    AttendanceService.getClassBreakdown({ date: today, classId }),
+    AttendanceService.getRecentActivity({ date: today, classId, limit: 8 }),
+    getAttendanceTrend({ mode: "daily", classId }),
+    getAttendanceTrend({ mode: "monthly", classId }),
+    getClassAttendanceTrend({ classId }),
+    Promise.all(
+      disciplineMonths.map((m) =>
+        getTopDisciplinedStudents({ month: m.value, classId, limit: 5 })
+      )
+    ),
+    Promise.all(
+      disciplineMonths.map((m) =>
+        getLowestAttendanceStudents({ month: m.value, classId, limit: 5 })
+      )
+    ),
+    Promise.all(
+      disciplineMonths.map((m) =>
+        getTopLateStudents({ month: m.value, classId, limit: 5 })
+      )
+    ),
+    getLateRecapToday({ classId }),
+  ]);
 
   const hadirTotal = recap.counts.HADIR + recap.counts.TERLAMBAT;
   const persentaseKehadiran =
@@ -103,8 +131,11 @@ export default async function DashboardPage() {
 
 
 
-      {/* Statistic cards — UI_RULES §15, spacing kelipatan 4px */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Statistic cards — UI_RULES §15, spacing kelipatan 4px. Rekap
+          Keterlambatan Hari Ini digabung di sini karena bentuknya sama-sama
+          angka ringkas + ikon (bukan leaderboard), jadi grid diperluas jadi
+          5 kolom di layar besar. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Total Siswa"
           value={recap.totalSiswa}
@@ -130,6 +161,15 @@ export default async function DashboardPage() {
           icon={UserX}
           tone="neutral"
         />
+        <LateRecapTodayCard recap={lateRecapToday} />
+      </div>
+
+      {/* Baris tambahan: Top 5 Kehadiran Terendah & Top 5 Paling Sering
+          Terlambat -- sama-sama leaderboard bulanan berdampingan, mengikuti
+          pola visual DisciplineLeaderboard di atas. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <LowAttendanceLeaderboard leaderboards={lowAttendanceLeaderboards} />
+        <LateLeaderboard leaderboards={lateLeaderboards} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
