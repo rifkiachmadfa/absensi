@@ -26,12 +26,21 @@ export type ScanQueueItem<TResult> = {
   status: ScanQueueStatus;
   label: string;
   detail?: string;
+  // Info tambahan bebas bentuk (mis. { className: "XI TKJ 1" }) untuk
+  // ditampilkan di UI (lihat ScanLiveCard) tanpa perlu mengubah bentuk
+  // dasar ScanQueueItem tiap kali ada field baru yang mau ditonjolkan.
+  meta?: Record<string, string>;
   result?: TResult;
 };
 
 type UseScanQueueOptions<TResult> = {
   // Mengubah response FINAL dari server menjadi label + warna badge.
-  classify: (result: TResult) => { status: ScanQueueStatus; label: string; detail?: string };
+  classify: (result: TResult) => {
+    status: ScanQueueStatus;
+    label: string;
+    detail?: string;
+    meta?: Record<string, string>;
+  };
   // Dipanggil setiap kali response server datang (mis. untuk toast + refresh tabel).
   onResult: (result: TResult) => void;
   // Jumlah maksimum item yang ditampilkan di panel riwayat (yang terlama dibuang).
@@ -68,9 +77,9 @@ export function useScanQueue<TResult>({
 
       submit()
         .then((result) => {
-          const { status, label, detail } = classify(result);
+          const { status, label, detail, meta } = classify(result);
           setQueue((prev) =>
-            prev.map((item) => (item.id === id ? { ...item, status, label, detail, result } : item))
+            prev.map((item) => (item.id === id ? { ...item, status, label, detail, meta, result } : item))
           );
           onResult(result);
         })

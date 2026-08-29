@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { Bluetooth } from "lucide-react";
+import { Bluetooth, Camera, ScanBarcode, XCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,13 +14,27 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
+import { ScanLiveCard } from "@/components/absensi/scan-live-card";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
 import { STATUS_LABEL } from "@/lib/constants/attendance";
+import { cn } from "@/lib/utils";
 import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
+
+// Dua sumber input kartu (Section 8.1 & scanner-bridge lokal) tetap
+// berujung ke handleDetected yang SAMA -- toggle ini murni UI, memilih mana
+// yang perlu DILIHAT guru: preview kamera (mode "camera") atau kartu
+// live-processing yang tidak butuh kamera sama sekali (mode "bridge").
+// Scanner-bridge WebSocket (useScannerBridge) tetap didengarkan di kedua
+// mode selama dialog terbuka -- yang berubah hanya apakah kamera HP
+// dinyalakan atau tidak (mematikan preview kamera saat scanner fisik
+// dipakai supaya tidak menguras baterai/menyalakan kamera yang sudah tidak
+// diperlukan).
+type ScanMode = "camera" | "bridge";
 
 type Student = { id: string; name: string; nisn: string; className: string };
 
@@ -69,16 +83,23 @@ function classifyResult(result: AttendanceCheckInResponse): {
   status: ScanQueueStatus;
   label: string;
   detail?: string;
+  meta?: Record<string, string>;
 } {
   if (result.type === "SUCCESS") {
     return {
       status: "success",
       label: result.student.name,
       detail: `${STATUS_LABEL[result.status] ?? result.status} · ${jamJakarta(result.time)}`,
+      meta: { className: result.student.className },
     };
   }
   if (result.type === "ALREADY_CHECKED_IN") {
-    return { status: "warning", label: result.student.name, detail: "Sudah absen" };
+    return {
+      status: "warning",
+      label: result.student.name,
+      detail: `Sudah absen · ${jamJakarta(result.time)}`,
+      meta: { className: result.student.className },
+    };
   }
   if (result.type === "STUDENT_INACTIVE") {
     return { status: "error", label: result.student.name, detail: "Siswa nonaktif" };
@@ -86,13 +107,14 @@ function classifyResult(result: AttendanceCheckInResponse): {
   if (result.type === "SCHOOL_CLOSED") {
     return { status: "error", label: "Hari ini libur" };
   }
-  return { status: "error", label: "QR tidak dikenali" };
+  return { status: "error", label: "QR tidak dikenali", detail: "Kartu siswa tidak dikenali oleh sistem" };
 }
 
 export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
+  const [scanMode, setScanMode] = useState<ScanMode>("camera");
 
   const { queue, enqueue, isInFlight, reset } = useScanQueue<AttendanceCheckInResponse>({
     classify: classifyResult,
@@ -135,10 +157,11 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   // ada scanner-bridge yang berjalan di PC ini (mayoritas guru hanya
   // memakai kamera HP), hook ini gagal konek secara diam-diam tanpa
   // mengganggu apa pun.
-  const { status: bridgeStatus, scannerCount } = useScannerBridge({
+  const { status: bridgeStatus, scanners } = useScannerBridge({
     enabled: open,
     onScan: handleDetected,
   });
+  const scannerCount = scanners.length;
 
   const searchStudents = useCallback(async (q: string) => {
     setQuery(q);
@@ -173,6 +196,7 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const resetDialogState = useCallback(() => {
     setStudents([]);
     setQuery("");
+    setScanMode("camera");
     reset();
   }, [reset]);
 
@@ -197,20 +221,90 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
           </TabsList>
 
           <TabsContent value="scan">
-            {/* Kamera tetap dipertahankan hidup selama dialog terbuka -- tidak
-               lagi di-unmount menunggu hasil scan sebelumnya, supaya guru
-               bisa langsung mengarahkan ke kartu berikutnya. */}
-            {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
+            {/* Pilihan metode input kartu: Kamera HP (default, Section 8.1)
+               atau Scanner Fisik (scanner-bridge lokal). Murni pilihan
+               TAMPILAN -- kedua metode berujung ke handleDetected yang sama
+               persis, jadi tidak ada logic absensi ganda. */}
+            <div className="mb-3 inline-flex w-full items-center gap-1 rounded-lg bg-muted p-1">
+              <button
+                type="button"
+                onClick={() => setScanMode("camera")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  scanMode === "camera"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Camera className="size-4" />
+                Kamera
+              </button>
+              <button
+                type="button"
+                onClick={() => setScanMode("bridge")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  scanMode === "bridge"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <ScanBarcode className="size-4" />
+                Scanner Fisik
+              </button>
+            </div>
 
-            {/* Indikator hanya muncul kalau scanner meja BENAR-BENAR
-               tersambung -- disembunyikan total untuk guru yang cuma
-               memakai kamera HP, supaya tidak ada kesan "tidak terhubung"
-               yang membingungkan padahal memang tidak dipakai. */}
-            {bridgeStatus === "connected" && scannerCount > 0 && (
-              <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                <Bluetooth className="size-3.5 text-[#22949E]" />
-                {scannerCount} scanner meja terhubung
-              </p>
+            {scanMode === "camera" ? (
+              <>
+                {/* Kamera tetap dipertahankan hidup selama dialog terbuka --
+                   tidak lagi di-unmount menunggu hasil scan sebelumnya,
+                   supaya guru bisa langsung mengarahkan ke kartu berikutnya. */}
+                {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
+
+                {/* Indikator hanya muncul kalau scanner meja BENAR-BENAR
+                   tersambung -- disembunyikan total untuk guru yang cuma
+                   memakai kamera HP, supaya tidak ada kesan "tidak terhubung"
+                   yang membingungkan padahal memang tidak dipakai. */}
+                {bridgeStatus === "connected" && scannerCount > 0 && (
+                  <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                    <Bluetooth className="size-3.5 text-[#22949E]" />
+                    {scannerCount} scanner meja terhubung
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="space-y-3">
+                {/* Kamera TIDAK di-render sama sekali di mode ini (bukan
+                   cuma disembunyikan lewat CSS) -- QrScanner di-unmount
+                   sehingga stream kamera HP benar-benar dimatikan karena
+                   sudah tidak diperlukan. */}
+                <ScanLiveCard item={queue[0]} />
+
+                {/* Karena tidak ada preview kamera untuk dilihat, status
+                   koneksi scanner-bridge ditampilkan penuh di sini (bukan
+                   hanya saat "connected" seperti di mode Kamera) supaya
+                   guru tahu kalau ternyata aplikasi bridge belum berjalan. */}
+                <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                  {bridgeStatus === "connected" ? (
+                    <>
+                      <Bluetooth className="size-3.5 text-[#22949E]" />
+                      {scannerCount > 0
+                        ? `${scannerCount} scanner meja terhubung`
+                        : "Terhubung ke bridge, menunggu scanner..."}
+                    </>
+                  ) : bridgeStatus === "connecting" ? (
+                    <>
+                      <Spinner className="size-3.5" />
+                      Menghubungkan ke scanner bridge...
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="size-3.5 text-destructive" />
+                      Scanner bridge tidak terhubung. Pastikan aplikasi bridge berjalan di PC ini.
+                    </>
+                  )}
+                </p>
+              </div>
             )}
           </TabsContent>
 

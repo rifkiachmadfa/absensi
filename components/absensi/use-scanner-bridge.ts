@@ -4,9 +4,20 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ScannerBridgeClient,
+  type ScannerBridgeScannerInfo,
   type ScannerBridgeStatus,
 } from "@/lib/scanner-bridge/scanner-bridge-client";
 import { SCANNER_BRIDGE_DEDUPE_MS, SCANNER_BRIDGE_URL } from "@/lib/constants/scanner-bridge";
+
+// Info scan TERAKHIR yang masuk lewat bridge -- dipakai UI (ScannerBridgePanel)
+// untuk feedback "scan terakhir dari Scanner Meja mana, jam berapa". Ini
+// murni tampilan; tidak dipakai untuk logic absensi apa pun (itu tetap
+// AttendanceService di server).
+export type ScannerBridgeLastScan = {
+  scannerId: string;
+  scannerName: string;
+  time: number;
+};
 
 // Menghubungkan dialog Scan Absensi / Scan Pulang ke scanner-bridge lokal
 // (Phase 9/10) -- kalau ada scanner meja (mis. 4x EPPOS Bluetooth) yang
@@ -31,7 +42,8 @@ export function useScannerBridge(options: {
 }) {
   const { enabled, onScan } = options;
   const [status, setStatus] = useState<ScannerBridgeStatus>("disconnected");
-  const [scannerCount, setScannerCount] = useState(0);
+  const [scanners, setScanners] = useState<ScannerBridgeScannerInfo[]>([]);
+  const [lastScan, setLastScan] = useState<ScannerBridgeLastScan | null>(null);
 
   // `onScan` datang dari parent dan bisa berubah identitas tiap render
   // (sama seperti onDetectedRef di qr-scanner.tsx) -- disimpan lewat ref
@@ -58,16 +70,17 @@ export function useScannerBridge(options: {
     const client = new ScannerBridgeClient(SCANNER_BRIDGE_URL, {
       onStatusChange: (next) => {
         setStatus(next);
-        if (next !== "connected") setScannerCount(0);
+        if (next !== "connected") setScanners([]);
       },
-      onScannersUpdate: (scanners) => setScannerCount(scanners.length),
-      onScan: (token) => {
+      onScannersUpdate: (next) => setScanners(next),
+      onScan: (token, scanner) => {
         const now = Date.now();
         const last = lastScanRef.current;
         if (last && last.token === token && now - last.time < SCANNER_BRIDGE_DEDUPE_MS) {
           return;
         }
         lastScanRef.current = { token, time: now };
+        setLastScan({ scannerId: scanner.id, scannerName: scanner.name, time: now });
         onScanRef.current(token);
       },
     });
@@ -79,5 +92,5 @@ export function useScannerBridge(options: {
     };
   }, [enabled]);
 
-  return { status, scannerCount };
+  return { status, scanners, lastScan };
 }
