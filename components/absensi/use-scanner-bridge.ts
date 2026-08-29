@@ -38,7 +38,7 @@ export type ScannerBridgeLastScan = {
 // opsional di UI, bukan sesuatu yang wajib ditampilkan.
 export function useScannerBridge(options: {
   enabled: boolean;
-  onScan: (token: string) => void;
+  onScan: (token: string, scanner: ScannerBridgeScannerInfo) => void;
 }) {
   const { enabled, onScan } = options;
   const [status, setStatus] = useState<ScannerBridgeStatus>("disconnected");
@@ -49,7 +49,7 @@ export function useScannerBridge(options: {
   // (sama seperti onDetectedRef di qr-scanner.tsx) -- disimpan lewat ref
   // supaya tidak memicu effect koneksi jalan ulang tiap kali parent
   // re-render.
-  const onScanRef = useRef(onScan);
+  const onScanRef = useRef<typeof onScan>(onScan);
   useEffect(() => {
     onScanRef.current = onScan;
   }, [onScan]);
@@ -81,7 +81,7 @@ export function useScannerBridge(options: {
         }
         lastScanRef.current = { token, time: now };
         setLastScan({ scannerId: scanner.id, scannerName: scanner.name, time: now });
-        onScanRef.current(token);
+        onScanRef.current(token, scanner);
       },
     });
 

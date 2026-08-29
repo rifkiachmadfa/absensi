@@ -1,5 +1,6 @@
 "use client";
-
+import Link from "next/link";
+import { ScanBarcode } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import {
 import { ScanDialog } from "@/components/absensi/scan-dialog";
 import { StatusDropdown } from "@/components/absensi/status-dropdown";
 import { BulkStatusDropdown } from "@/components/absensi/bulk-status-dropdown";
+import { Spinner } from "@/components/ui/spinner";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import type { AttendanceTableRow, ClassOption } from "@/lib/types/attendance";
 import { ScanDialogPulang } from "@/components/absensi/scan-dialog-pulang";
@@ -32,7 +34,13 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
   const [search, setSearch] = useState("");
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [rows, setRows] = useState<AttendanceTableRow[]>([]);
+  // isLoading: hanya true untuk load PERTAMA (belum pernah ada data sama
+  // sekali) -- ini satu-satunya kondisi yang menampilkan skeleton penuh.
   const [isLoading, setIsLoading] = useState(true);
+  // isFetching: refetch di belakang layar (ganti tanggal/kelas/status
+  // filter). Baris lama tetap tampil (stale-while-revalidate) supaya tabel
+  // tidak "reload"/flicker -- hanya indikator kecil yang muncul.
+  const [isFetching, setIsFetching] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -44,20 +52,23 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
 
   const loadTable = useCallback(
     async (signal?: AbortSignal) => {
-      setIsLoading(true);
+      setIsFetching(true);
       try {
         const params = new URLSearchParams({ date });
         if (classId !== "all") params.set("classId", classId);
         if (statusFilter !== "all") params.set("status", statusFilter);
         const res = await fetch(`/api/absensi/table?${params.toString()}`, { signal });
         const data = await res.json();
-        if (!signal?.aborted) setRows(data.rows ?? []);
+        if (!signal?.aborted) {
+          setRows(data.rows ?? []);
+          setIsLoading(false);
+        }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           console.error("Load attendance table error:", err);
         }
       } finally {
-        if (!signal?.aborted) setIsLoading(false);
+        if (!signal?.aborted) setIsFetching(false);
       }
     },
     [date, classId, statusFilter]
@@ -69,6 +80,44 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     loadTable(controller.signal);
     return () => controller.abort();
   }, [loadTable]);
+
+  // Refresh baris tertentu saja (setelah ubah status satu/beberapa siswa)
+  // tanpa query ulang seluruh tabel dan tanpa memicu skeleton -- baris lain
+  // tidak ikut ter-refetch/flicker. Baris yang setelah diubah tidak lagi
+  // cocok dengan filter status yang aktif akan hilang dari tampilan, sama
+  // seperti kalau tabel di-reload penuh.
+  const refreshRows = useCallback(
+    async (studentIds: string[]) => {
+      if (studentIds.length === 0) return;
+      try {
+        const params = new URLSearchParams({ date, studentIds: studentIds.join(",") });
+        if (classId !== "all") params.set("classId", classId);
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        const res = await fetch(`/api/absensi/table?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const updated = new Map<string, AttendanceTableRow>(
+          (data.rows ?? []).map((r: AttendanceTableRow) => [r.studentId, r])
+        );
+        setRows((prev) => {
+          const next = prev
+            .map((r) => (updated.has(r.studentId) ? updated.get(r.studentId)! : r))
+            .filter((r) => !studentIds.includes(r.studentId) || updated.has(r.studentId));
+          // Baris baru yang belum ada di tabel saat ini (mis. hasil filter
+          // classId/status berubah antara request) turut disisipkan.
+          for (const id of studentIds) {
+            if (updated.has(id) && !next.some((r) => r.studentId === id)) {
+              next.push(updated.get(id)!);
+            }
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error("Refresh attendance row error:", err);
+      }
+    },
+    [date, classId, statusFilter]
+  );
 
   // Reset seleksi checkbox setiap kali filter berubah, supaya tidak ada
   // studentId "terpilih" yang sudah tidak tampak di tabel (mis. pindah
@@ -120,8 +169,9 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     if (result.failed.length > 0) {
       toast.error(`${result.failed.length} siswa gagal diubah statusnya.`);
     }
+    const affectedIds = Array.from(selectedIds);
     setSelectedIds(new Set());
-    loadTable();
+    refreshRows(affectedIds);
   };
 
   const colSpan = canEditStatus ? 7 : 5;
@@ -129,11 +179,20 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Absensi Siswa</h1>
-        <div className="flex gap-2">
-          <ScanDialogPulang onSuccess={loadTable} />
-          <ScanDialog onSuccess={loadTable} />
-        </div>
+        <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
+          Absensi Siswa
+          {isFetching && !isLoading && (
+            <Spinner className="text-muted-foreground" aria-label="Memperbarui data" />
+          )}
+        </h1>
+<div className="flex flex-wrap gap-2">
+  <Button variant="outline" size="lg" render={<Link href="/absensi/scanner-fisik" />}>
+    <ScanBarcode className="size-4" />
+    Scanner Fisik
+  </Button>
+  <ScanDialogPulang onSuccess={loadTable} />
+  <ScanDialog onSuccess={loadTable} />
+</div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -221,7 +280,11 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
               {canEditStatus && <th className="p-3 text-left">Aksi</th>}
             </tr>
           </thead>
-          <tbody>
+          <tbody
+            className={
+              isFetching && !isLoading ? "opacity-60 transition-opacity" : "transition-opacity"
+            }
+          >
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-t">
@@ -283,7 +346,7 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
                         studentId={row.studentId}
                         date={date}
                         currentStatus={row.status}
-                        onChanged={loadTable}
+                        onChanged={() => refreshRows([row.studentId])}
                       />
                     </td>
                   )}

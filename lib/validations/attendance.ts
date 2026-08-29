@@ -37,6 +37,9 @@ export const tableQuerySchema = z.object({
   date: z.string().date(),
   classId: z.string().optional(),
   status: z.string().optional(),
+  // Targeted refresh: hanya ambil baris untuk studentId ini (dipakai UI
+  // /absensi setelah ubah status, supaya tidak perlu reload seluruh tabel).
+  studentIds: z.array(z.string().min(1)).optional(),
 });
 
 // Semua status yang boleh dipilih guru/petugas saat konfirmasi kehadiran

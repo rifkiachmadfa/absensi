@@ -2,7 +2,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
 import { Bluetooth, Camera, ScanBarcode, XCircle } from "lucide-react";
 import {
   Dialog,
@@ -18,10 +17,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { ScanLiveCard } from "@/components/absensi/scan-live-card";
-import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
+import { useScanQueue } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
-import { STATUS_LABEL } from "@/lib/constants/attendance";
+import { classifyCheckInResult, notifyCheckInResult } from "@/lib/attendance/classify-result";
 import { cn } from "@/lib/utils";
 import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
 
@@ -38,78 +37,6 @@ type ScanMode = "camera" | "bridge";
 
 type Student = { id: string; name: string; nisn: string; className: string };
 
-function jamJakarta(iso: string) {
-  return new Intl.DateTimeFormat("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "Asia/Jakarta",
-  }).format(new Date(iso));
-}
-
-// Toast di pojok layar untuk tiap hasil scan yang "menyusul" dari background
-// -- guru tetap tahu hasilnya meski sudah lanjut mengarahkan kamera ke
-// siswa berikutnya (Section 29: guru tidak perlu menekan tombol apapun
-// untuk lanjut ke siswa berikutnya).
-function notify(result: AttendanceCheckInResponse) {
-  if (result.type === "SUCCESS") {
-    toast.success(`${result.student.name} berhasil absen`, {
-      description: `${STATUS_LABEL[result.status] ?? result.status} · ${result.student.className} · ${jamJakarta(result.time)}`,
-    });
-    return;
-  }
-  if (result.type === "ALREADY_CHECKED_IN") {
-    toast.warning(`${result.student.name} sudah absen`, {
-      description: `Tercatat pada ${jamJakarta(result.time)}`,
-    });
-    return;
-  }
-  if (result.type === "STUDENT_INACTIVE") {
-    toast.error(`${result.student.name} berstatus nonaktif`);
-    return;
-  }
-  if (result.type === "SCHOOL_CLOSED") {
-    toast.error("Hari ini libur, absensi tidak aktif.");
-    return;
-  }
-  toast.error("QR Code tidak dikenali oleh sistem");
-}
-
-// Memformat response FINAL dari server menjadi label + warna badge untuk
-// ScanQueuePanel. Tidak menebak apa pun -- AttendanceService.checkIn() di
-// server sudah menyelesaikan identifikasi, cek duplikat, dan penentuan
-// status dalam satu transaksi sebelum hasil ini sampai ke client.
-function classifyResult(result: AttendanceCheckInResponse): {
-  status: ScanQueueStatus;
-  label: string;
-  detail?: string;
-  meta?: Record<string, string>;
-} {
-  if (result.type === "SUCCESS") {
-    return {
-      status: "success",
-      label: result.student.name,
-      detail: `${STATUS_LABEL[result.status] ?? result.status} · ${jamJakarta(result.time)}`,
-      meta: { className: result.student.className },
-    };
-  }
-  if (result.type === "ALREADY_CHECKED_IN") {
-    return {
-      status: "warning",
-      label: result.student.name,
-      detail: `Sudah absen · ${jamJakarta(result.time)}`,
-      meta: { className: result.student.className },
-    };
-  }
-  if (result.type === "STUDENT_INACTIVE") {
-    return { status: "error", label: result.student.name, detail: "Siswa nonaktif" };
-  }
-  if (result.type === "SCHOOL_CLOSED") {
-    return { status: "error", label: "Hari ini libur" };
-  }
-  return { status: "error", label: "QR tidak dikenali", detail: "Kartu siswa tidak dikenali oleh sistem" };
-}
-
 export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -117,9 +44,9 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const [scanMode, setScanMode] = useState<ScanMode>("camera");
 
   const { queue, enqueue, isInFlight, reset } = useScanQueue<AttendanceCheckInResponse>({
-    classify: classifyResult,
+    classify: classifyCheckInResult,
     onResult: (result) => {
-      notify(result);
+      notifyCheckInResult(result);
       if (result.type === "SUCCESS") onSuccess();
     },
   });

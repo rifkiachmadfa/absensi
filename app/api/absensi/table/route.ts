@@ -8,10 +8,15 @@ export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
+  const studentIdsParam = req.nextUrl.searchParams.get("studentIds");
+
   const parsed = tableQuerySchema.safeParse({
     date: req.nextUrl.searchParams.get("date"),
     classId: req.nextUrl.searchParams.get("classId") ?? undefined,
     status: req.nextUrl.searchParams.get("status") ?? undefined,
+    studentIds: studentIdsParam
+      ? studentIdsParam.split(",").filter(Boolean)
+      : undefined,
   });
   if (!parsed.success) {
     return NextResponse.json({ message: "Parameter tidak valid." }, { status: 400 });
@@ -25,6 +30,7 @@ export async function GET(req: NextRequest) {
       date: new Date(`${parsed.data.date}T00:00:00.000Z`),
       classId,
       status: parsed.data.status,
+      studentIds: parsed.data.studentIds,
     });
     return NextResponse.json({ rows });
   } catch (err) {

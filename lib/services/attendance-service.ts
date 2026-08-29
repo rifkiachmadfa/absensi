@@ -245,21 +245,31 @@ export class AttendanceService {
     date: Date;
     classId?: string;
     studentId?: string;
+    studentIds?: string[];
     status?: string;
   }) {
-    const { date, classId, studentId, status } = params;
+    const { date, classId, studentId, studentIds, status } = params;
+
+    // studentIds dipakai untuk targeted refresh (mis. setelah ubah status
+    // satu/beberapa baris di /absensi) -- ambil ulang baris tsb saja tanpa
+    // query ulang seluruh tabel. studentId (tunggal) tetap didukung untuk
+    // kompatibilitas pemanggil lain.
+    const idFilter =
+      studentIds && studentIds.length > 0
+        ? { id: { in: studentIds } }
+        : studentId
+          ? { id: studentId }
+          : {};
 
     const students = await prisma.student.findMany({
       where: {
         status: StudentStatus.ACTIVE,
         ...(classId ? { classId } : {}),
-        ...(studentId ? { id: studentId } : {}),
+        ...idFilter,
       },
       select: { id: true, name: true, nisn: true, class: { select: { name: true } } },
       orderBy: { name: "asc" },
     });
-
-    const studentIds = students.map((s) => s.id);
 
     const attendances = await prisma.attendance.findMany({
       where: { date, studentId: { in: studentIds } },
