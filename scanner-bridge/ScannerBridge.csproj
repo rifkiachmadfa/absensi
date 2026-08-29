@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    PENTING (baca sebelum build):
+
+    Project ini HANYA bisa di-build & dijalankan di Windows, karena memakai
+    Win32 Raw Input API (user32.dll) dan SetupAPI (setupapi.dll) lewat
+    P/Invoke untuk device discovery & pembacaan HID per-device (lihat
+    Phase 2 & Phase 3 di docs/scanner-integration/01-audit-dan-arsitektur.md
+    untuk alasan kenapa Raw Input dipilih, bukan global keyboard hook biasa).
+
+    Project ini TIDAK PERNAH dibuild/dijalankan/ditest di sandbox
+    pengembangan (Linux, tanpa akses NuGet) tempat kode ini ditulis.
+    Sandbox tsb tidak punya Windows maupun .NET SDK. WAJIB di-build ulang
+    dan diverifikasi di PC Windows target sebelum dipakai produksi.
+
+    Build (di Windows, dengan .NET 8 SDK terpasang):
+      cd scanner-bridge
+      dotnet restore
+      dotnet build
+
+    Jalankan mode discovery (lihat README.md untuk perintah lengkapnya,
+    karena argumen CLI-nya memakai tanda pemisah yang tidak boleh
+    dituliskan berulang di dalam komentar XML ini).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ScannerBridge</RootNamespace>
+    <AssemblyName>scanner-bridge</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- UseWindowsForms diperlukan HANYA untuk NativeWindow (message-only
+         window) yang menerima WM_INPUT, lihat src/RawInput/RawInputWindow.cs.
+         Tidak dipakai untuk UI apa pun; aplikasi ini tanpa jendela terlihat. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- System.Text.Json sudah termasuk dalam .NET 8, tidak perlu paket
+         tambahan untuk baca/tulis scanner-map.json maupun protokol WebSocket. -->
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,15 @@
+{
+  "_comment": "Salin ke scanner-map.json (tanpa .example), isi devicePath dari hasil `scanner-bridge.exe --discover` per unit (lihat README.md), lalu jalankan `scanner-bridge.exe --serve` untuk mode harian.",
+  "websocket": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "_comment_token": "OPSIONAL. Isi dengan string acak (mis. hasil `openssl rand -hex 16`) kalau ingin browser wajib mengirim token ini sebelum menerima siaran scan. Kosongkan (\"\") kalau tidak perlu -- loopback-only sudah jadi lapisan pertahanan utama.",
+    "token": ""
+  },
+  "scanners": [
+    { "id": "scanner-1", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 1" },
+    { "id": "scanner-2", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 2" },
+    { "id": "scanner-3", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 3" },
+    { "id": "scanner-4", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 4" }
+  ]
+}

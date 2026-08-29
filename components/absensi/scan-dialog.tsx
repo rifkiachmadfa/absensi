@@ -3,6 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+import { Bluetooth } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
+import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
 import { STATUS_LABEL } from "@/lib/constants/attendance";
 import type { AttendanceCheckInResponse } from "@/lib/types/attendance";
@@ -126,6 +128,18 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
     [enqueue, isInFlight]
   );
 
+  // Sumber scan KEDUA (opsional): scanner meja fisik lewat scanner-bridge
+  // lokal (Phase 9/10), aktif hanya selagi dialog ini terbuka. Hasilnya
+  // diteruskan ke handleDetected yang SAMA PERSIS dipakai kamera -- tidak
+  // ada logic absensi terpisah, tidak ada endpoint terpisah. Kalau tidak
+  // ada scanner-bridge yang berjalan di PC ini (mayoritas guru hanya
+  // memakai kamera HP), hook ini gagal konek secara diam-diam tanpa
+  // mengganggu apa pun.
+  const { status: bridgeStatus, scannerCount } = useScannerBridge({
+    enabled: open,
+    onScan: handleDetected,
+  });
+
   const searchStudents = useCallback(async (q: string) => {
     setQuery(q);
     if (q.trim().length < 2) return setStudents([]);
@@ -187,6 +201,17 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
                lagi di-unmount menunggu hasil scan sebelumnya, supaya guru
                bisa langsung mengarahkan ke kartu berikutnya. */}
             {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
+
+            {/* Indikator hanya muncul kalau scanner meja BENAR-BENAR
+               tersambung -- disembunyikan total untuk guru yang cuma
+               memakai kamera HP, supaya tidak ada kesan "tidak terhubung"
+               yang membingungkan padahal memang tidak dipakai. */}
+            {bridgeStatus === "connected" && scannerCount > 0 && (
+              <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <Bluetooth className="size-3.5 text-[#22949E]" />
+                {scannerCount} scanner meja terhubung
+              </p>
+            )}
           </TabsContent>
 
           <TabsContent value="manual">

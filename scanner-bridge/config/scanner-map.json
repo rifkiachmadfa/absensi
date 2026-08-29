@@ -1,0 +1,18 @@
+{
+  "websocket": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "scanners": [
+    {
+      "id": "scanner-1",
+      "devicePath": "\\\\?\\HID#{00001124-0000-1000-8000-00805f9b34fb}_VID\u00260001045e_PID\u00260040#9\u002614147cc5\u00260\u00260000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}",
+      "name": "Scanner Meja 1"
+    },
+    {
+      "id": "scanner-2",
+      "devicePath": "\\\\?\\HID#{00001124-0000-1000-8000-00805f9b34fb}_VID\u00260001045e_PID\u00260040#9\u00264af8e6c\u00260\u00260000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}",
+      "name": "Scanner Meja 2"
+    }
+  ]
+}

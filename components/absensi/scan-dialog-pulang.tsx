@@ -3,6 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+import { Bluetooth } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
+import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
 import type { AttendanceCheckOutResponse } from "@/lib/types/attendance";
 
@@ -120,6 +122,16 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
     [enqueue, isInFlight]
   );
 
+  // Sumber scan KEDUA (opsional): scanner meja fisik lewat scanner-bridge
+  // lokal (Phase 9/10), aktif hanya selagi dialog ini terbuka. Sama persis
+  // dengan scan-dialog.tsx (masuk) -- hasilnya diteruskan ke handleDetected
+  // yang sama dipakai kamera, berujung ke AttendanceService.checkOut() yang
+  // sama, tanpa logic atau endpoint terpisah untuk scanner meja.
+  const { status: bridgeStatus, scannerCount } = useScannerBridge({
+    enabled: open,
+    onScan: handleDetected,
+  });
+
   const searchStudents = useCallback(async (q: string) => {
     setQuery(q);
     if (q.trim().length < 2) return setStudents([]);
@@ -176,6 +188,16 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
 
           <TabsContent value="scan">
             {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
+
+            {/* Sama seperti scan-dialog.tsx: hanya tampil kalau scanner
+               meja benar-benar tersambung, disembunyikan total untuk guru
+               yang cuma memakai kamera HP. */}
+            {bridgeStatus === "connected" && scannerCount > 0 && (
+              <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <Bluetooth className="size-3.5 text-[#22949E]" />
+                {scannerCount} scanner meja terhubung
+              </p>
+            )}
           </TabsContent>
 
           <TabsContent value="manual">
