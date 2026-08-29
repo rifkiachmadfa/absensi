@@ -82,11 +82,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Content Writer RBC\\Downloads\\scanner-bridge-phase8\\scanner-bridge\\ScannerBridge.csproj",
+      "projectUniqueName": "C:\\Users\\Content Writer RBC\\test2\\absensi\\scanner-bridge\\ScannerBridge.csproj",
       "projectName": "scanner-bridge",
-      "projectPath": "C:\\Users\\Content Writer RBC\\Downloads\\scanner-bridge-phase8\\scanner-bridge\\ScannerBridge.csproj",
+      "projectPath": "C:\\Users\\Content Writer RBC\\test2\\absensi\\scanner-bridge\\ScannerBridge.csproj",
       "packagesPath": "C:\\Users\\Content Writer RBC\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Content Writer RBC\\Downloads\\scanner-bridge-phase8\\scanner-bridge\\obj\\",
+      "outputPath": "C:\\Users\\Content Writer RBC\\test2\\absensi\\scanner-bridge\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Content Writer RBC\\AppData\\Roaming\\NuGet\\NuGet.Config"

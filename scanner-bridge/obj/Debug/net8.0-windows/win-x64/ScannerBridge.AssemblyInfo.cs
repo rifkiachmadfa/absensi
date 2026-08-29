@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("scanner-bridge")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+03ab15b9bee1e0bae82b3399399c51f7c1affa9d")]
 [assembly: System.Reflection.AssemblyProductAttribute("scanner-bridge")]
 [assembly: System.Reflection.AssemblyTitleAttribute("scanner-bridge")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
