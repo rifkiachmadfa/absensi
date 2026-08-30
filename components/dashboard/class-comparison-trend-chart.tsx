@@ -215,7 +215,7 @@ export function ClassComparisonTrendChart({
       </CardHeader>
 
       {data.series.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-2 px-6 pb-1">
+        <div className="flex flex-wrap gap-x-4 gap-y-2 px-4 pb-1">
           {data.series.map((s) => {
             const color = colorByClassId.get(s.classId) ?? "#22949E";
             const checked = checkedIds.has(s.classId);

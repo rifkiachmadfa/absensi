@@ -112,6 +112,7 @@ export default async function DashboardPage() {
           </h1>
         </div>
       </div>
+      <DashboardRealtimeListener />
       <QuickActions role={user.role} />
       {/* Grafik tren kehadiran — diletakkan di atas shortcut Absensi/Laporan/
           Daftar Siswa sesuai permintaan; toggle Harian/Bulanan tidak butuh
@@ -135,7 +136,14 @@ export default async function DashboardPage() {
           Keterlambatan Hari Ini digabung di sini karena bentuknya sama-sama
           angka ringkas + ikon (bukan leaderboard), jadi grid diperluas jadi
           5 kolom di layar besar. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {/* grid-cols-2/sm:4/lg:5 -- dipilih supaya 4 StatCard inti SELALU
+          membentuk baris genap (2x2 di mobile, 1x4 di tablet) tanpa kartu
+          nyasar sendirian. LateRecapTodayCard sengaja diberi col-span penuh
+          di mobile & tablet (bentuk kontennya beda -- ada DirectionBadge
+          dengan teks lebih panjang, butuh lebar penuh supaya tidak
+          terpotong/wrap aneh) lalu kembali jadi 1 kolom biasa di layar besar
+          supaya tetap membentuk 1 baris rapi berisi 5 kartu seperti semula. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
         <StatCard
           label="Total Siswa"
           value={recap.totalSiswa}
@@ -161,7 +169,9 @@ export default async function DashboardPage() {
           icon={UserX}
           tone="neutral"
         />
-        <LateRecapTodayCard recap={lateRecapToday} />
+        <div className="col-span-2 sm:col-span-4 lg:col-span-1">
+          <LateRecapTodayCard recap={lateRecapToday} />
+        </div>
       </div>
 
       {/* Baris tambahan: Top 5 Kehadiran Terendah & Top 5 Paling Sering

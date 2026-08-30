@@ -56,6 +56,15 @@ const STATUS_TABS: {
   hoverColor: string;
   percentageKey: "persentaseHadir" | "persentaseSakit" | "persentaseIzin" | "persentaseAlpha";
   countLabel: (p: AttendanceTrendPoint) => string;
+  // Rentang sumbu-Y per status. Hadir secara historis selalu 80-98%, jadi
+  // grafik dimulai dari 75% (bukan 0%) supaya naik-turunnya terlihat jelas
+  // -- kalau mulai dari 0%, batang selalu terlihat "penuh" dan variasi
+  // antar hari/bulan jadi tidak terbaca. Sakit/Izin/Alpha sebaliknya
+  // biasanya di bawah 10%, jadi dikunci ke rentang 0-10% (bukan 0-100%)
+  // dengan alasan yang sama: supaya perbedaan kecil (mis. 2% vs 5%) masih
+  // kelihatan, bukan jadi garis rata nyaris di bawah.
+  yAxisMin: number;
+  yAxisMax: number;
 }[] = [
   {
     value: "HADIR",
@@ -64,6 +73,8 @@ const STATUS_TABS: {
     hoverColor: "#15803D",
     percentageKey: "persentaseHadir",
     countLabel: (p) => `Hadir + Terlambat: ${p.hadir + p.terlambat}/${p.totalSiswa}`,
+    yAxisMin: 75,
+    yAxisMax: 100,
   },
   {
     value: "SAKIT",
@@ -72,6 +83,8 @@ const STATUS_TABS: {
     hoverColor: "#1C7F88",
     percentageKey: "persentaseSakit",
     countLabel: (p) => `Sakit: ${p.sakit}/${p.totalSiswa}`,
+    yAxisMin: 0,
+    yAxisMax: 10,
   },
   {
     value: "IZIN",
@@ -80,6 +93,8 @@ const STATUS_TABS: {
     hoverColor: "#123F50",
     percentageKey: "persentaseIzin",
     countLabel: (p) => `Izin: ${p.izin}/${p.totalSiswa}`,
+    yAxisMin: 0,
+    yAxisMax: 10,
   },
   {
     value: "ALPHA",
@@ -88,6 +103,8 @@ const STATUS_TABS: {
     hoverColor: "#B91C1C",
     percentageKey: "persentaseAlpha",
     countLabel: (p) => `Alpha: ${p.alpha}/${p.totalSiswa}`,
+    yAxisMin: 0,
+    yAxisMax: 10,
   },
 ];
 
@@ -164,15 +181,19 @@ export function AttendanceTrendChart({
             ticks: { color: "#71858C", font: { size: 12 } },
           },
           y: {
-            beginAtZero: true,
-            max: 100,
+            min: statusConfig.yAxisMin,
+            max: statusConfig.yAxisMax,
             grid: { color: "#EAF7F8" },
             border: { display: false },
             ticks: {
               color: "#71858C",
               font: { size: 12 },
               callback: (value) => `${value}%`,
-              stepSize: 25,
+              // Hadir: 75-100 dalam step 5 (5 garis). Sakit/Izin/Alpha:
+              // 0-10 dalam step 2 (6 garis) -- keduanya dihitung dari
+              // rentang statusConfig supaya jumlah garis grid tetap rapi
+              // walau rentangnya beda jauh (25 vs 10).
+              stepSize: (statusConfig.yAxisMax - statusConfig.yAxisMin) / 5,
             },
           },
         },
