@@ -52,6 +52,7 @@ export type AttendanceTableRow = {
   className: string;
   status: "HADIR" | "TERLAMBAT" | "SAKIT" | "IZIN" | "DISPENSASI" | "ALPHA" | "BELUM_ABSEN";
   checkInAt: string | null;
+  checkOutAt: string | null;
 };
 
 export type ClassOption = { id: string; name: string };

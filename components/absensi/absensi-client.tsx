@@ -22,6 +22,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { STATUS_LABEL, STATUS_BADGE_CLASS } from "@/lib/constants/attendance";
 import type { AttendanceTableRow, ClassOption } from "@/lib/types/attendance";
 import { ScanDialogPulang } from "@/components/absensi/scan-dialog-pulang";
+// Nilai filter semu (bukan status di database) untuk "Belum Absen Pulang" --
+// digabung ke dropdown Status yang sama karena secara UX ini tetap terasa
+// sebagai satu filter "Status" bagi guru/admin, walau secara data ini
+// turunan dari checkInAt/checkOutAt, bukan kolom status Attendance.
+const BELUM_PULANG_VALUE = "BELUM_PULANG";
+
 function todayJakarta() {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" });
   return formatter.format(new Date());
@@ -56,7 +62,12 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
       try {
         const params = new URLSearchParams({ date });
         if (classId !== "all") params.set("classId", classId);
-        if (statusFilter !== "all") params.set("status", statusFilter);
+        // BELUM_PULANG bukan status Attendance yang dikenal server -- jangan
+        // dikirim sebagai filter status, biarkan server kirim semua status
+        // lalu difilter di client (lihat filteredRows).
+        if (statusFilter !== "all" && statusFilter !== BELUM_PULANG_VALUE) {
+          params.set("status", statusFilter);
+        }
         const res = await fetch(`/api/absensi/table?${params.toString()}`, { signal });
         const data = await res.json();
         if (!signal?.aborted) {
@@ -92,7 +103,9 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
       try {
         const params = new URLSearchParams({ date, studentIds: studentIds.join(",") });
         if (classId !== "all") params.set("classId", classId);
-        if (statusFilter !== "all") params.set("status", statusFilter);
+        if (statusFilter !== "all" && statusFilter !== BELUM_PULANG_VALUE) {
+          params.set("status", statusFilter);
+        }
         const res = await fetch(`/api/absensi/table?${params.toString()}`);
         if (!res.ok) return;
         const data = await res.json();
@@ -126,11 +139,17 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     setSelectedIds(new Set());
   }, [date, classId, statusFilter]);
 
-  const filteredRows = rows.filter((r) =>
-    search.trim().length === 0
-      ? true
-      : r.name.toLowerCase().includes(search.toLowerCase()) || r.nisn.includes(search)
-  );
+  const filteredRows = rows
+    .filter((r) =>
+      statusFilter === BELUM_PULANG_VALUE
+        ? r.checkInAt !== null && r.checkOutAt === null
+        : true
+    )
+    .filter((r) =>
+      search.trim().length === 0
+        ? true
+        : r.name.toLowerCase().includes(search.toLowerCase()) || r.nisn.includes(search)
+    );
 
   const selectedCount = selectedIds.size;
   const visibleIds = useMemo(() => filteredRows.map((r) => r.studentId), [filteredRows]);
@@ -174,7 +193,7 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
     refreshRows(affectedIds);
   };
 
-  const colSpan = canEditStatus ? 7 : 5;
+  const colSpan = canEditStatus ? 8 : 6;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -223,6 +242,7 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
                 {label}
               </SelectItem>
             ))}
+            <SelectItem value={BELUM_PULANG_VALUE}>Belum Absen Pulang</SelectItem>
           </SelectContent>
         </Select>
 
@@ -276,6 +296,7 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
               <th className="p-3 text-left">NISN</th>
               <th className="p-3 text-left">Kelas</th>
               <th className="p-3 text-left">Jam Masuk</th>
+              <th className="p-3 text-left">Jam Pulang</th>
               <th className="p-3 text-left">Status</th>
               {canEditStatus && <th className="p-3 text-left">Aksi</th>}
             </tr>
@@ -333,6 +354,16 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
                           second: "2-digit",
                           timeZone: "Asia/Jakarta",
                         }).format(new Date(row.checkInAt))
+                      : "-"}
+                  </td>
+                  <td className="p-3">
+                    {row.checkOutAt
+                      ? new Intl.DateTimeFormat("id-ID", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          timeZone: "Asia/Jakarta",
+                        }).format(new Date(row.checkOutAt))
                       : "-"}
                   </td>
                   <td className="p-3">

@@ -286,6 +286,7 @@ export class AttendanceService {
         className: s.class.name,
         status: a?.status ?? ("BELUM_ABSEN" as const),
         checkInAt: a?.checkInAt.toISOString() ?? null,
+        checkOutAt: a?.checkOutAt?.toISOString() ?? null,
       };
     });
 
