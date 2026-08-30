@@ -5,6 +5,8 @@
 > Dokumen dibuat sebelum kode ditulis agar keputusan arsitektur, scope, behavior, dan batasan implementasi tidak berubah atau hilang antar sesi development.
 >
 > **Status: DISEPAKATI — SIAP DIIMPLEMENTASIKAN**
+>
+> ⚠️ **UPDATE:** Keputusan "1 token via env var, tidak ada migration/tabel baru" pada dokumen awal (§3, §4, §19–§23, §40–§42) **telah direvisi**. Nomor pengirim Fonnte kini dikonfigurasi dinamis (multi-sender, disimpan di database) melalui halaman Pengaturan khusus SUPERADMIN. **Baca §45 (Adendum) sebagai rujukan final** sebelum mengikuti section-section lama yang disebut di atas.
 
 ---
 
@@ -120,6 +122,8 @@ Header:
 ```text
 Authorization: <FONNTE_TOKEN>
 ```
+
+> ⚠️ Nilai `<FONNTE_TOKEN>` **tidak lagi berasal dari environment variable tunggal** — lihat **§45**. Token diambil dari nomor pengirim yang sedang `isActive = true` di database.
 
 **Catatan penting:**
 
@@ -810,6 +814,8 @@ Ikuti struktur data yang sudah digunakan oleh `AttendanceService`.
 
 # 19. Security
 
+> ⚠️ **Superseded sebagian oleh §45.** `FONNTE_TOKEN` sebagai satu-satunya sumber token **tidak lagi berlaku** — token kini per-nomor pengirim di tabel `WhatsAppSender`. Prinsip "tidak boleh sampai ke client/log/source code" di bawah ini **tetap berlaku penuh**, hanya sumber penyimpanannya yang berubah dari env var menjadi database (server-only).
+
 `FONNTE_TOKEN` adalah secret.
 
 Token:
@@ -838,6 +844,8 @@ NEXT_PUBLIC_FONNTE_TOKEN
 ---
 
 # 20. Environment Variables
+
+> ⚠️ **Superseded oleh §45.** Section ini (env var `FONNTE_TOKEN` sebagai sumber token) **tidak lagi dipakai** untuk fitur ini. Token disimpan di database lewat halaman Pengaturan (SUPERADMIN). Tidak perlu menambahkan `FONNTE_TOKEN` ke `.env`/`.env.example`.
 
 Tambahkan ke:
 
@@ -905,23 +913,21 @@ Jangan menjadikan environment development gagal hanya karena token belum tersedi
 
 # 22. File yang Dibuat/Diubah
 
-Hanya file berikut yang direncanakan untuk perubahan.
+> ⚠️ **Tabel di bawah ini superseded oleh §45** (ada tabel & migration baru untuk konfigurasi nomor pengirim). Baris untuk `whatsapp-service.ts` dan `attendance-service.ts` tetap berlaku apa adanya.
 
-| File                                 | Perubahan                                                    |
-| ------------------------------------ | ------------------------------------------------------------ |
-| `lib/services/whatsapp-service.ts`   | **BARU** — implementasi `WhatsAppService.notifyAttendance()` |
-| `lib/services/attendance-service.ts` | Memanggil WhatsAppService setelah check-in/check-out SUCCESS |
-| `.env.example`                       | Menambahkan `FONNTE_TOKEN`                                   |
+| File                                  | Perubahan                                                      |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `lib/services/whatsapp-service.ts`     | **BARU** — implementasi `WhatsAppService.notifyAttendance()`    |
+| `lib/services/attendance-service.ts`   | Memanggil WhatsAppService setelah check-in/check-out SUCCESS    |
+| ~~`.env.example` — `FONNTE_TOKEN`~~    | **Dibatalkan**, lihat §45 (token pindah ke database)            |
 
-Tidak ada perubahan schema Prisma.
-
-Tidak ada migration baru.
-
-Tidak ada tabel baru.
+Lihat **§45.6** untuk daftar file lengkap termasuk konfigurasi multi-sender.
 
 ---
 
 # 23. Prisma Schema
+
+> ⚠️ **Superseded oleh §45.** Fitur ini sekarang **membutuhkan** migration baru untuk tabel `WhatsAppSender`. Larangan "jangan membuat migration/tabel baru" pada section ini **tidak berlaku lagi**.
 
 Kolom:
 
@@ -929,9 +935,9 @@ Kolom:
 student.whatsappNumber
 ```
 
-sudah tersedia.
+sudah tersedia dan tetap dipakai apa adanya untuk **nomor penerima** (orang tua/wali) — ini tidak berubah.
 
-**Jangan membuat migration baru untuk fitur ini.**
+Yang berubah hanyalah sumber **token/nomor pengirim**, yang sebelumnya direncanakan dari env var, sekarang dari tabel baru `WhatsAppSender` (lihat §45).
 
 Jangan menambahkan:
 
@@ -945,7 +951,7 @@ atau:
 whatsapp_messages
 ```
 
-untuk versi ini.
+untuk versi ini — larangan ini tetap berlaku (tidak ada tabel log pengiriman/riwayat pesan, hanya tabel konfigurasi pengirim).
 
 ---
 
@@ -1359,21 +1365,26 @@ Implementasi dianggap selesai apabila seluruh kondisi berikut terpenuhi.
 
 ## Environment
 
-* [ ] `FONNTE_TOKEN` digunakan dari server environment.
-* [ ] `FONNTE_TOKEN` tidak menggunakan `NEXT_PUBLIC_`.
+> ⚠️ Checklist di bawah **diperbarui** — sumber token bukan lagi env var tunggal, lihat §45.
+
+* [ ] Token diambil dari `WhatsAppSender` yang `isActive = true` di database, bukan hardcode/env var.
+* [ ] Token tidak pernah dikirim ke client (termasuk dalam response API config).
+* [ ] Token tidak ditampilkan penuh di UI manapun (masked, mis. `••••3xF2`).
 * [ ] Token tidak masuk source code.
 * [ ] Token tidak masuk Git.
 * [ ] Token tidak muncul di log.
-* [ ] Jika token tidak tersedia, WhatsApp di-skip dan attendance tetap berjalan.
+* [ ] Jika tidak ada sender yang `isActive = true`, WhatsApp di-skip dan attendance tetap berjalan.
 
 ## Database
+
+> ⚠️ Checklist di bawah **diperbarui** — migration & tabel baru untuk `WhatsAppSender` kini diperbolehkan, lihat §45.
 
 * [ ] Attendance disimpan terlebih dahulu.
 * [ ] Prisma transaction selesai commit sebelum request Fonnte.
 * [ ] Tidak ada request Fonnte di dalam `$transaction()`.
-* [ ] Tidak ada migration baru.
-* [ ] Tidak ada schema Prisma baru.
-* [ ] Tidak ada tabel WhatsApp baru.
+* [ ] Migration untuk `WhatsAppSender` dibuat dengan aman (tidak mengubah/menghapus data existing).
+* [ ] Tidak ada tabel log pengiriman/riwayat pesan WhatsApp (`whatsapp_logs`/`whatsapp_messages`) — hanya tabel konfigurasi pengirim.
+* [ ] Hanya ada maksimal satu `WhatsAppSender.isActive = true` pada satu waktu (dijamin di service layer, bukan hard constraint DB).
 
 ## Error Handling
 
@@ -1407,6 +1418,13 @@ Implementasi dianggap selesai apabila seluruh kondisi berikut terpenuhi.
 * [ ] Tidak ada delivery tracking.
 * [ ] Tidak ada WhatsApp history database.
 * [ ] Tidak ada template editor.
+
+## Role & Akses (baru — lihat §45)
+
+* [ ] Halaman konfigurasi nomor pengirim hanya dapat diakses role `SUPERADMIN`.
+* [ ] Server action CRUD/aktivasi sender di-guard dengan `requireRole(["SUPERADMIN"])`, bukan hanya disembunyikan di UI.
+* [ ] Akses langsung via URL oleh ADMIN/GURU/WALI_KELAS ke halaman/aksi ini ditolak (redirect `/unauthorized`).
+* [ ] Trigger pengiriman WhatsApp saat check-in/check-out **tidak dibatasi role** — tetap berjalan otomatis untuk siapa pun yang melakukan absensi (guru/admin), sesuai §5.
 
 ---
 
@@ -1600,20 +1618,24 @@ Jika dokumen ini digunakan sebagai instruction untuk AI coding agent, agent waji
 
 ### Saat coding
 
+> ⚠️ Poin 7, 8, 9, dan 13 di bawah **sudah tidak berlaku** — lihat §45 untuk aturan pengganti.
+
 5. Buat `lib/services/whatsapp-service.ts`.
 6. Modifikasi `attendance-service.ts` seminimal mungkin.
-7. Tambahkan `FONNTE_TOKEN` ke `.env.example`.
-8. Jangan mengubah schema Prisma.
-9. Jangan membuat migration.
-10. Jangan membuat queue.
-11. Jangan membuat retry.
-12. Jangan membuat tabel log.
-13. Jangan membuat UI pengaturan WhatsApp.
-14. Jangan mengubah behavior existing attendance.
-15. Jangan mengekspos Fonnte token ke client.
-16. Gunakan `STATUS_LABEL` existing.
-17. Gunakan timezone `Asia/Jakarta`.
-18. Pastikan WhatsApp failure tidak menggagalkan attendance.
+7. ~~Tambahkan `FONNTE_TOKEN` ke `.env.example`~~ — **dibatalkan**, token disimpan di tabel `WhatsAppSender`, bukan env var.
+8. ~~Jangan mengubah schema Prisma~~ — **dibatalkan**, tambahkan model `WhatsAppSender` sesuai §45.1.
+9. ~~Jangan membuat migration~~ — **dibatalkan**, buat migration untuk `WhatsAppSender` sesuai §45.1.
+10. Jangan membuat queue. *(tetap berlaku)*
+11. Jangan membuat retry. *(tetap berlaku)*
+12. Jangan membuat tabel log pengiriman/riwayat pesan WhatsApp. *(tetap berlaku — tabel baru hanya untuk konfigurasi sender, bukan log pesan)*
+13. ~~Jangan membuat UI pengaturan WhatsApp~~ — **dibatalkan**, buat tab "Notifikasi WhatsApp" di `/pengaturan` khusus SUPERADMIN sesuai §45.3.
+14. Jangan mengubah behavior existing attendance. *(tetap berlaku)*
+15. Jangan mengekspos Fonnte token ke client (termasuk di halaman konfigurasi baru — selalu masked). *(tetap berlaku, makin penting karena sekarang ada UI-nya)*
+16. Gunakan `STATUS_LABEL` existing. *(tetap berlaku)*
+17. Gunakan timezone `Asia/Jakarta`. *(tetap berlaku)*
+18. Pastikan WhatsApp failure tidak menggagalkan attendance. *(tetap berlaku)*
+19. Guard halaman & server action konfigurasi sender dengan `requireRole(["SUPERADMIN"])`, ikuti pola `pengaturan-service.ts`/`guard.ts` yang sudah ada.
+20. Pastikan hanya satu `WhatsAppSender` yang `isActive = true` pada satu waktu (lakukan dalam `$transaction` saat mengaktifkan sender lain).
 
 ### Setelah coding
 
@@ -1634,12 +1656,11 @@ Jika dokumen ini digunakan sebagai instruction untuk AI coding agent, agent waji
 Agent **JANGAN**:
 
 * membuat WhatsApp service di client;
-* menggunakan `NEXT_PUBLIC_FONNTE_TOKEN`;
-* hardcode token;
-* mengirim token ke browser;
+* menggunakan `NEXT_PUBLIC_FONNTE_TOKEN` atau `NEXT_PUBLIC_` apa pun untuk token;
+* hardcode token di source code;
+* mengirim token (utuh) ke browser, termasuk di halaman konfigurasi sender — selalu masked;
 * memasukkan token ke log;
-* membuat migration;
-* membuat tabel WhatsApp;
+* ~~membuat migration~~ / ~~membuat tabel WhatsApp~~ — **dibatalkan untuk kasus `WhatsAppSender`**, lihat §45. Larangan ini tetap berlaku untuk tabel *log/riwayat pengiriman pesan*;
 * membuat queue;
 * membuat Redis dependency;
 * membuat retry otomatis;
@@ -1648,18 +1669,19 @@ Agent **JANGAN**:
 * mengirim WhatsApp untuk `setManualStatus()`;
 * mengirim WhatsApp untuk status SAKIT/IZIN/DISPENSASI/ALPHA;
 * mengubah business logic attendance yang sudah ada;
-* menambahkan provider WhatsApp kedua;
-* membuat UI pengaturan template;
+* menambahkan provider WhatsApp kedua (selain Fonnte);
+* membuat UI pengaturan **template** pesan (template tetap hardcoded — ini beda dengan UI konfigurasi **nomor pengirim** yang sekarang justru wajib dibuat, lihat §45.3);
 * membuat sistem delivery tracking;
-* membuat multiple recipient;
+* membuat multiple recipient (nomor **penerima**/orang tua tetap satu, `student.whatsappNumber`);
 * membuat scheduled blast;
+* mengizinkan role selain SUPERADMIN mengelola/melihat konfigurasi sender (CRUD & isi token);
 * melakukan refactor besar yang tidak diperlukan untuk fitur ini.
 
 ---
 
 # 42. Expected File Structure
 
-Setelah implementasi, struktur minimal yang diharapkan:
+> ⚠️ **Superseded oleh §45.6** — ada file tambahan untuk konfigurasi multi-sender (migration, service, validation, komponen UI, server action). Struktur di bawah ini adalah baseline lama untuk notifikasi itu sendiri dan tetap benar, tapi tidak lengkap lagi.
 
 ```text
 lib/
@@ -1671,7 +1693,7 @@ lib/
     └── whatsapp-service.ts
 ```
 
-Tidak diperlukan struktur tambahan untuk versi pertama.
+Lihat **§45.6** untuk struktur file lengkap termasuk konfigurasi sender.
 
 ---
 
@@ -1780,10 +1802,214 @@ Jika request Fonnte timeout, attendance tetap harus berjalan.
 
 ---
 
+# 45. ADENDUM — Nomor Pengirim Dinamis (Multi-Sender)
+
+> **Status: DISEPAKATI — SUPERSEDES bagian terkait di §3–§4, §19–§23, §36, §40–§42.**
+>
+> Semua prinsip di dokumen utama (best-effort, non-blocking, event-driven, tanpa queue/retry/blast massal, tanpa tabel log pesan) **tetap berlaku penuh**. Adendum ini **hanya** mengubah *dari mana token/nomor pengirim Fonnte diambil* dan *siapa yang boleh mengelolanya* — bukan mengubah kapan/bagaimana pesan dikirim.
+
+## 45.0 Latar Belakang
+
+Desain awal (`FONNTE_TOKEN` sebagai satu env var statis, diisi manual) diganti karena kebutuhan operasional:
+
+* Nomor WhatsApp pengirim sekolah bisa berganti (device logout, nomor diblokir/dibatasi, ganti provider device, dst — lihat risiko di §3.1).
+* Admin tertinggi perlu bisa mengganti nomor pengirim **tanpa deploy ulang** aplikasi atau mengubah environment variable di hosting.
+* Ke depan mungkin ada lebih dari satu nomor terdaftar (cadangan), tapi hanya **satu yang aktif digunakan mengirim** pada satu waktu.
+* **Setup harus lewat scan QR langsung di aplikasi kita** (mirip pairing WhatsApp Web), **bukan** admin copy-paste device token dari dashboard Fonnte secara manual.
+
+Fonnte menyediakan API resmi untuk kebutuhan ini — dikonfirmasi dari dokumentasi mereka (`docs.fonnte.com`):
+
+| Endpoint Fonnte     | Fungsi                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `POST /add-device`  | Buat device baru via API (pakai **Account Token**) → Fonnte balikin **device token** otomatis |
+| `POST /qr`           | Ambil QR code (base64 image) untuk device tersebut, ditampilkan di UI kita |
+| `POST /get-devices`  | Cek status semua device (`connect`/`disconnect`) — dipakai untuk polling |
+| Disconnect Device    | Putuskan device yang sedang terhubung (dipakai saat mengganti nomor)   |
+
+Dengan ini, **admin tidak pernah mengetik device token secara manual** — token didapat otomatis dari response `/add-device` dan disimpan langsung oleh server. Yang diketik admin hanya label & nomor WA (bukan secret).
+
+**Penting — dua jenis token berbeda, jangan tertukar:**
+
+* **Account Token** — satu token untuk seluruh akun Fonnte sekolah (bukan per-nomor). Dipakai server untuk memanggil `/add-device` dan cek status device. Disimpan sebagai env var `FONNTE_ACCOUNT_TOKEN` (server-only, bukan `NEXT_PUBLIC_`).
+* **Device Token** (`WhatsAppSender.fonteToken`) — token spesifik per nomor/device, didapat otomatis dari Fonnte saat device dibuat, dipakai untuk kirim pesan (`/send`). Disimpan di database, bukan env var, sesuai §45.1.
+
+Konsekuensi paket: Fonnte membatasi **paket Free hanya boleh 1 device tersambung** bersamaan. Kalau sekolah butuh menyimpan beberapa nomor cadangan yang bisa dipakai kapan saja, pastikan paket Fonnte yang dipakai mendukung jumlah device sesuai kebutuhan.
+
+## 45.1 Model Data Baru — `WhatsAppSender`
+
+Tabel baru khusus **konfigurasi pengirim** (bukan log/riwayat pesan — itu tetap dilarang, lihat §29.3):
+
+```prisma
+enum WhatsAppSenderStatus {
+  PENDING_SCAN   // device sudah dibuat di Fonnte, QR sudah digenerate, menunggu discan
+  CONNECTED      // berhasil discan & terhubung ke WhatsApp
+  DISCONNECTED   // pernah connect, sekarang putus (logout/expired/manual disconnect)
+}
+
+model WhatsAppSender {
+  id          String                @id @default(cuid())
+  label       String                // nama bebas untuk memudahkan admin, mis. "Nomor Utama TU"
+  phoneNumber String                // nomor WA device ini, format 62xxxxxxxxxx, diinput admin saat create
+  fonteToken  String                // device token — DIISI OTOMATIS dari response Fonnte /add-device, TIDAK PERNAH diketik admin, TIDAK PERNAH dikirim utuh ke client
+  status      WhatsAppSenderStatus  @default(PENDING_SCAN)
+  isActive    Boolean               @default(false)
+  updatedById String?
+  updatedBy   User?                 @relation("WhatsAppSenderUpdatedBy", fields: [updatedById], references: [id])
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([isActive])
+  @@index([status])
+}
+```
+
+Tambahkan relasi balik di `model User`:
+
+```prisma
+updatedWhatsappSenders WhatsAppSender[] @relation("WhatsAppSenderUpdatedBy")
+```
+
+Aturan data:
+
+* Hanya boleh ada **maksimal satu** baris dengan `isActive = true` pada satu waktu. Ini **dijamin di service layer** (bukan constraint database), lewat `$transaction`: set semua sender lain `isActive = false`, baru set target `isActive = true`.
+* **Hanya sender dengan `status = CONNECTED`** yang boleh menjadi `isActive = true`. Sender `PENDING_SCAN`/`DISCONNECTED` tidak boleh diaktifkan (lihat §45.3 untuk kapan status berubah jadi `CONNECTED`).
+* Tidak ada batas jumlah baris `isActive = false` (riwayat/cadangan nomor boleh disimpan banyak, masing-masing dengan status-nya sendiri).
+* `WhatsAppSender` boleh dihapus (hard delete — ini data konfigurasi, bukan data historis absensi, jadi tidak tunduk pada aturan soft-delete §3.3 yang berlaku untuk `Student`). **Kecuali** baris yang sedang `isActive = true` — sender aktif harus dinonaktifkan/diganti aktifnya dulu sebelum bisa dihapus. Saat dihapus dan statusnya masih `CONNECTED`, server juga memanggil Fonnte Disconnect Device supaya device tidak menggantung di sisi Fonnte.
+* `fonteToken` **tidak pernah** diinput manual oleh admin — selalu hasil response `/add-device` dari Fonnte, ditulis langsung oleh server ke database.
+
+## 45.2 Perubahan `WhatsAppService`
+
+`WhatsAppService.notifyAttendance()` sekarang mengambil sender aktif di awal, sebelum membangun request:
+
+```ts
+const sender = await prisma.whatsAppSender.findFirst({
+  where: { isActive: true },
+  select: { fonteToken: true },
+});
+
+if (!sender) {
+  console.warn("[WhatsAppService] Tidak ada sender aktif — skip notifikasi.");
+  return;
+}
+```
+
+Ini **satu query ringan**, sejalan dengan §18.1 (hindari query tambahan yang tidak perlu) — bukan N+1, hanya dipanggil sekali per notifikasi, dan tidak menyentuh tabel `Student`/`Attendance` yang datanya sudah tersedia dari `AttendanceService`.
+
+Behavior tetap mengikuti §7/§8: jika `sender` tidak ada → **skip, bukan error**, attendance tetap `SUCCESS` — sama persis seperti perilaku lama "token tidak tersedia di env".
+
+## 45.3 UI Konfigurasi — Khusus SUPERADMIN, Setup via Scan QR
+
+Tambahkan tab baru **"Notifikasi WhatsApp"** di `/pengaturan`, mengikuti pola tab "Jadwal Absensi"/"Hari Libur" yang sudah ada (lihat `app/(protected)/pengaturan/page.tsx` — hanya render jika `actor.role === "SUPERADMIN"`).
+
+### 45.3.1 Alur Tambah Nomor (Scan QR)
+
+```text
+SUPERADMIN klik "Tambah Nomor"
+        ↓
+Input: label + nomor WA (bukan secret, boleh manual)
+        ↓
+Server panggil Fonnte POST /add-device (pakai FONNTE_ACCOUNT_TOKEN)
+        ↓
+Fonnte balikin device token
+        ↓
+WhatsAppSender dibuat: status = PENDING_SCAN, isActive = false
+        ↓
+Server panggil Fonnte POST /qr (pakai device token)
+        ↓
+QR image (base64) ditampilkan di UI kita
+        ↓
+Admin scan pakai HP WhatsApp sekolah
+        ↓
+Client polling ke server kita setiap beberapa detik
+        ↓
+Server cek status device ke Fonnte (get-devices / device profile)
+        ↓
+Status Fonnte = "connect"
+        ↓
+WhatsAppSender.status → CONNECTED
+        ↓
+Dalam satu $transaction: semua sender lain isActive=false, sender ini isActive=true
+        ↓
+UI menampilkan "Terhubung & Aktif" — nomor langsung bisa dipakai kirim WhatsApp
+```
+
+**Auto-aktivasi**: begitu status berubah menjadi `CONNECTED`, sender itu **langsung otomatis diaktifkan** (`isActive = true`) tanpa perlu klik tombol tambahan — sesuai keputusan bisnis. Sender lama yang sebelumnya aktif otomatis menjadi nonaktif di transaksi yang sama, sehingga **selalu ada maksimal 1 sender aktif**, tidak pernah 2 sekaligus.
+
+Sender yang gagal discan (QR kedaluwarsa, admin batal) tetap tersimpan dengan `status = PENDING_SCAN` — bisa di-generate ulang QR-nya atau dihapus, tidak otomatis terhapus.
+
+### 45.3.2 Isi Halaman
+
+* Daftar sender tersimpan: label, nomor, **status koneksi** (badge: "Menunggu Scan" / "Terhubung" / "Terputus" — ikon+teks, bukan cuma warna, sesuai §32), badge aktif/nonaktif terpisah dari status koneksi.
+* Tombol "Tambah Nomor" → membuka modal alur QR (§45.3.1).
+* Tombol "Scan Ulang" untuk sender `PENDING_SCAN`/`DISCONNECTED` (generate ulang QR pakai device token yang sama, tidak membuat device baru).
+* Tombol "Putuskan" (disconnect) untuk sender `CONNECTED` yang bukan sedang aktif — memanggil Fonnte Disconnect Device, status → `DISCONNECTED`.
+* Aksi hapus — ditolak untuk sender yang sedang `isActive = true` (harus diputuskan/nonaktif dulu), sesuai §45.1.
+* **Tidak ada** form input token manual di mana pun pada halaman ini — token selalu berasal dari server (§45.1).
+
+**Role guard wajib di dua lapis** (konsisten dengan §5 project spec & pola `guard.ts` existing):
+
+1. Halaman/tab hanya tampil untuk `SUPERADMIN` (kosmetik).
+2. Setiap server action (`createSenderAndGetQr`, `refreshSenderStatus`, `disconnectSender`, `deleteSender`) memanggil `requireRole(["SUPERADMIN"])` di awal — supaya akses langsung lewat request tidak bisa bypass UI.
+
+ADMIN, GURU, dan WALI_KELAS **tidak** melihat tab ini dan **tidak** bisa memanggil action-nya sama sekali (bukan cuma read-only — no access).
+
+## 45.4 Audit Log
+
+Setiap perubahan tercatat di `AuditLog` yang sudah ada (pola sama seperti `pengaturan-service.ts`), entity `"WhatsAppSender"`:
+
+* `CREATE` — "Menambahkan nomor pengirim WhatsApp: {label} ({phoneNumber}), menunggu scan QR"
+* `UPDATE` (saat status → CONNECTED + auto-aktif) — "Nomor WhatsApp {label} ({phoneNumber}) terhubung & otomatis diaktifkan sebagai pengirim"
+* `UPDATE` (saat sender lain otomatis nonaktif karena ada yang baru connect) — "Nomor WhatsApp {label lama} dinonaktifkan (digantikan {label baru})"
+* `UPDATE` (disconnect manual) — "Memutuskan nomor pengirim WhatsApp: {label} ({phoneNumber})"
+* `DELETE` — "Menghapus nomor pengirim WhatsApp: {label} ({phoneNumber})"
+
+Token (device token maupun `FONNTE_ACCOUNT_TOKEN`) **tidak boleh** dicatat di `description` audit log dalam bentuk apa pun (utuh maupun masked).
+
+## 45.5 Security Tambahan
+
+* `fonteToken` (device token) hanya boleh di-`select` di server (`whatsapp-service.ts`, service sender saat memanggil Fonnte). Query list untuk UI **tidak boleh** `select: { fonteToken: true }` — ambil `status`/`isActive`/`label`/`phoneNumber` saja.
+* `FONNTE_ACCOUNT_TOKEN` hanya dibaca di server (server action/service), tidak pernah lewat props ke client component, tidak pakai prefix `NEXT_PUBLIC_`.
+* Response server action (`createSenderAndGetQr`, dst.) **tidak pernah** mengembalikan `fonteToken` maupun `FONNTE_ACCOUNT_TOKEN` ke client — yang dikembalikan ke client untuk ditampilkan hanya QR **image** (base64 png dari Fonnte), bukan token.
+* Endpoint polling status (dipanggil berulang dari client) hanya boleh mengembalikan `status`/`isActive`, tidak pernah token.
+* Halaman/action ini tunduk pada semua larangan §19 yang masih berlaku (no `NEXT_PUBLIC_`, no log, no expose ke response API).
+
+## 45.6 File yang Dibuat/Diubah (Lengkap — menggantikan §22 & §42)
+
+| File                                                    | Perubahan                                                                 |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `prisma/schema.prisma`                                  | **BARU** — model `WhatsAppSender` + enum `WhatsAppSenderStatus` + relasi di `User` |
+| `prisma/migrations/xxxx_add_whatsapp_sender/`           | **BARU** — migration                                                     |
+| `lib/services/whatsapp-service.ts`                      | **BARU** — `notifyAttendance()`, ambil sender aktif dari DB              |
+| `lib/services/fonnte-client.ts`                         | **BARU** — wrapper tipis panggilan Fonnte (`addDevice`, `getQr`, `getDeviceStatus`, `disconnectDevice`), dipakai oleh service sender maupun `whatsapp-service.ts` |
+| `lib/services/pengaturan-service.ts`                    | Tambah fungsi: buat sender + generate QR, refresh status (+auto-aktivasi), disconnect, delete |
+| `lib/validations/pengaturan.ts`                         | Tambah schema Zod untuk input sender (label, nomor — **tanpa field token**) |
+| `lib/services/attendance-service.ts`                    | Memanggil `WhatsAppService` setelah check-in/check-out `SUCCESS`         |
+| `app/(protected)/pengaturan/actions.ts`                 | Tambah server actions sender, di-guard `requireRole(["SUPERADMIN"])`     |
+| `app/(protected)/pengaturan/page.tsx`                   | Tambah tab "Notifikasi WhatsApp", render khusus `actor.role==="SUPERADMIN"` |
+| `components/pengaturan/whatsapp-sender-list.tsx`        | **BARU** — daftar sender + status + aksi                                 |
+| `components/pengaturan/whatsapp-sender-qr-dialog.tsx`   | **BARU** — modal tambah nomor: input label/nomor → tampilkan QR → polling status |
+| `.env.example`                                          | Tambah `FONNTE_ACCOUNT_TOKEN=` (tanpa nilai asli)                         |
+| `.env`                                                  | Tambah `FONNTE_ACCOUNT_TOKEN` dengan nilai asli (tidak di-commit)         |
+
+## 45.7 Testing Tambahan (melengkapi §37)
+
+* Tambah sender baru → `status = PENDING_SCAN`, `isActive = false`, QR tampil, belum bisa kirim WhatsApp (belum ada sender `isActive` kalau ini sender pertama).
+* Simulasikan device Fonnte jadi `connect` → polling mendeteksi → `status = CONNECTED` **dan** `isActive = true` otomatis, tanpa klik tambahan.
+* Sebelumnya ada sender A aktif → tambah & scan sender B sampai connect → B otomatis aktif, A otomatis nonaktif dalam transaksi yang sama → cek di DB **tidak pernah** ada momen 2 sender `isActive = true` bersamaan.
+* Tidak ada sender `status = CONNECTED` sama sekali (semua PENDING_SCAN/DISCONNECTED/kosong) → attendance tetap `SUCCESS`, WhatsApp skip.
+* QR tidak discan (timeout) → sender tetap `PENDING_SCAN`, tidak otomatis terhapus, admin bisa generate ulang QR.
+* Klik "Putuskan" pada sender yang sedang aktif → **diizinkan** (tidak diblokir seperti delete). Efeknya: `status → DISCONNECTED`, `isActive → false`, sistem sementara **tanpa sender aktif** → WhatsApp otomatis skip (attendance tetap `SUCCESS`, sesuai §7/§8) sampai admin scan/aktifkan sender lain. Ini disengaja lebih longgar daripada aturan hapus (§45.1), karena "putuskan" dipakai justru saat device bermasalah dan admin perlu segera menandainya, bukan operasi destruktif seperti hapus data.
+* User role `ADMIN`/`GURU`/`WALI_KELAS` mengakses tab/aksi konfigurasi sender → ditolak (`/unauthorized`), baik lewat UI (tab tidak muncul) maupun lewat pemanggilan action langsung.
+* Percobaan hapus sender yang sedang aktif → ditolak dengan pesan jelas, bukan error database mentah (ikuti §33 Error Handling).
+* Response dari server action (create/QR/status/list) tidak mengandung `fonteToken` maupun `FONNTE_ACCOUNT_TOKEN` di payload manapun (cek network/response, bukan cuma tampilan UI).
+* `FONNTE_ACCOUNT_TOKEN` tidak tersedia di environment → aksi "Tambah Nomor" gagal dengan pesan jelas ("Konfigurasi Fonnte belum lengkap, hubungi developer"), tidak crash, dan **tidak memengaruhi** attendance/WhatsApp yang sudah berjalan lewat sender aktif existing.
+
+---
+
 ## Status
 
 **DISEPAKATI**
 
-**SIAP DIIMPLEMENTASIKAN**
+**SIAP DIIMPLEMENTASIKAN** (termasuk §45 — adendum multi-sender)
 
 **Source of Truth: `docs/whatsapp-blast.md`**
