@@ -122,6 +122,7 @@ export default async function DetailSiswaPage({
               name: siswa.name,
               gender: siswa.gender,
               classId: siswa.classId,
+              whatsappNumber: siswa.whatsappNumber,
             }}
           />
         </div>
@@ -150,6 +151,10 @@ export default async function DetailSiswaPage({
             <div>
               <dt className="text-xs text-muted-foreground">Kelas</dt>
               <dd className="text-sm font-medium">{siswa.class.name}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Nomor WhatsApp</dt>
+              <dd className="text-sm font-medium">{siswa.whatsappNumber ?? "-"}</dd>
             </div>
           </dl>
           <p className="mt-3 text-xs text-muted-foreground">
