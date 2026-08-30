@@ -217,6 +217,7 @@ export async function createStudent(data: StudentFormInput, actor: SessionUser) 
       name: data.name.trim(),
       gender: data.gender,
       classId: data.classId,
+      whatsappNumber: normalizeOptional(data.whatsappNumber),
       qrToken,
     },
   });
@@ -274,6 +275,7 @@ export async function updateStudent(
       name: data.name.trim(),
       gender: data.gender,
       classId: data.classId,
+      whatsappNumber: normalizeOptional(data.whatsappNumber),
     },
   });
 

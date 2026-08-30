@@ -38,7 +38,9 @@ if (!canCreateStudentSomewhere(actor)) redirect("/unauthorized");
           mode="create"
           classOptions={classOptions}
           defaultValues={
-            classId ? { nis: "", nisn: "", name: "", classId } : undefined
+            classId
+              ? { nis: "", nisn: "", name: "", classId, whatsappNumber: "" }
+              : undefined
           }
         />
       )}

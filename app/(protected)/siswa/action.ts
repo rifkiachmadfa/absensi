@@ -30,6 +30,7 @@ function parseStudentForm(formData: FormData) {
     name: formData.get("name"),
     gender: formData.get("gender"),
     classId: formData.get("classId"),
+    whatsappNumber: formData.get("whatsappNumber") ?? "",
   });
 }
 

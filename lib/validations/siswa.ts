@@ -20,6 +20,12 @@ export const studentFormSchema = z.object({
     message: "Jenis kelamin wajib dipilih",
   }),
   classId: z.string().min(1, "Kelas wajib dipilih"),
+  whatsappNumber: z
+    .string()
+    .trim()
+    .regex(/^[0-9+ -]{9,20}$/, "Format nomor WhatsApp tidak valid")
+    .optional()
+    .or(z.literal("")),
 });
 
 export type StudentFormInput = z.infer<typeof studentFormSchema>;

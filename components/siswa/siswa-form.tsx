@@ -31,6 +31,7 @@ type SiswaFormProps = {
     name: string;
     gender?: "LAKI_LAKI" | "PEREMPUAN" | null;
     classId: string;
+    whatsappNumber?: string | null;
   };
 };
 
@@ -128,6 +129,23 @@ export function SiswaForm({
         </Select>
         {state.fieldErrors?.classId && (
           <p className="text-sm text-destructive">{state.fieldErrors.classId[0]}</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="whatsappNumber">Nomor WhatsApp</Label>
+        <Input
+          id="whatsappNumber"
+          name="whatsappNumber"
+          type="tel"
+          placeholder="08123456789"
+          defaultValue={defaultValues?.whatsappNumber ?? ""}
+        />
+        <p className="text-xs text-muted-foreground">
+          Opsional. Digunakan untuk notifikasi WhatsApp saat siswa absen masuk/pulang.
+        </p>
+        {state.fieldErrors?.whatsappNumber && (
+          <p className="text-sm text-destructive">{state.fieldErrors.whatsappNumber[0]}</p>
         )}
       </div>
 
