@@ -24,6 +24,12 @@ import type { AttendanceStatus } from "@/app/generated/prisma/client";
 const SCHOOL_NAME = "SMK Yadika Tanjungsari";
 const TIMEZONE = "Asia/Jakarta";
 
+// Update Section 14: baris disclaimer yang muncul di SEMUA pesan (CHECK_IN
+// maupun CHECK_OUT), menandakan pesan ini otomatis dari sistem -- bukan
+// diketik manual oleh guru/admin -- supaya orang tua/wali tidak membalas
+// pesan ini mengharapkan respons manusia.
+const AUTO_MESSAGE_NOTE = "Pesan ini dikirim otomatis oleh sistem absensi sekolah.";
+
 export type NotifyAttendanceParams =
   | {
       type: "CHECK_IN";
@@ -113,14 +119,26 @@ function buildMessage(params: NotifyAttendanceParams): string {
     // STATUS_LABEL adalah satu-satunya sumber label status (Section 16) --
     // jangan buat mapping status baru di sini.
     const statusLabel = STATUS_LABEL[params.status] ?? params.status;
-    return [
+    const lines = [
       "Assalamu'alaikum, Bapak/Ibu Wali Murid.",
       "",
       `Ananda ${params.studentName} (${params.className}) telah tiba di sekolah pada ${jam} WIB`,
       `dengan status ${statusLabel}.`,
-      "",
-      `— ${SCHOOL_NAME}`,
-    ].join("\n");
+    ];
+
+    // Update Section 14: khusus status TERLAMBAT, tambahkan satu baris yang
+    // meminta orang tua/wali menanyakan alasan keterlambatan sekaligus
+    // mengingatkan supaya tidak terulang -- status lain (HADIR/SAKIT/dll)
+    // tidak berubah dari template sebelumnya.
+    if (params.status === "TERLAMBAT") {
+      lines.push(
+        "",
+        "Mohon Bapak/Ibu menanyakan alasan keterlambatan Ananda hari ini, dan mengingatkan agar besok tidak terlambat lagi. Terima kasih."
+      );
+    }
+
+    lines.push("", `— ${SCHOOL_NAME}`, AUTO_MESSAGE_NOTE);
+    return lines.join("\n");
   }
 
   return [
@@ -128,7 +146,13 @@ function buildMessage(params: NotifyAttendanceParams): string {
     "",
     `Ananda ${params.studentName} (${params.className}) telah pulang sekolah pada ${jam} WIB.`,
     "",
+    // Update Section 14: baris penutup check-out -- menegaskan bahwa
+    // tanggung jawab sudah kembali ke orang tua/wali setelah keluar
+    // gerbang sekolah, dan meminta konfirmasi sampai rumah.
+    "Ananda telah diserahkan kembali kepada orang tua/wali. Mohon dipastikan Ananda sampai di rumah dengan selamat.",
+    "",
     `— ${SCHOOL_NAME}`,
+    AUTO_MESSAGE_NOTE,
   ].join("\n");
 }
 
