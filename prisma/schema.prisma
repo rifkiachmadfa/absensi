@@ -19,6 +19,7 @@ model User {
   auditLogs       AuditLog[]
   homeroomClasses Class[]      @relation("HomeroomTeacher")
   createdHolidays Holiday[]    @relation("HolidayCreatedBy")
+  updatedWhatsappSenders WhatsAppSender[] @relation("WhatsAppSenderUpdatedBy")
 }
 
 model AcademicYear {
@@ -67,6 +68,28 @@ model Student {
 
   @@index([classId])
   @@index([name])
+}
+
+enum WhatsAppSenderStatus {
+  PENDING_SCAN   // device sudah dibuat di Fonnte, QR sudah digenerate, menunggu discan
+  CONNECTED      // berhasil discan & terhubung ke WhatsApp
+  DISCONNECTED   // pernah connect, sekarang putus (logout/expired/manual disconnect)
+}
+
+model WhatsAppSender {
+  id          String                @id @default(cuid())
+  label       String                // nama bebas untuk memudahkan admin, mis. "Nomor Utama TU"
+  phoneNumber String                // nomor WA device ini, format 62xxxxxxxxxx, diinput admin saat create
+  fonteToken  String                // device token — DIISI OTOMATIS dari response Fonnte /add-device, TIDAK PERNAH diketik admin, TIDAK PERNAH dikirim utuh ke client
+  status      WhatsAppSenderStatus  @default(PENDING_SCAN)
+  isActive    Boolean               @default(false)
+  updatedById String?
+  updatedBy   User?                 @relation("WhatsAppSenderUpdatedBy", fields: [updatedById], references: [id])
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([isActive])
+  @@index([status])
 }
 
 model Attendance {

@@ -8,7 +8,9 @@ import type {
   AttendanceScheduleInput,
   DefaultScheduleInput,
   HolidayInput,
+  CreateWhatsAppSenderInput,
 } from "@/lib/validations/pengaturan";
+import * as fonnteClient from "@/lib/services/fonnte-client";
 
 export class PengaturanServiceError extends Error {}
 
@@ -247,6 +249,365 @@ export async function deleteHoliday(id: string, actor: SessionUser) {
       entity: "Holiday",
       entityId: holiday.id,
       description: `Menghapus hari libur ${holiday.date.toISOString().slice(0, 10)}: ${holiday.name}`,
+    },
+  });
+}
+
+// ============================================================
+// Notifikasi WhatsApp — Nomor Pengirim (khusus SUPERADMIN)
+// docs/whatsapp-blast.md Section 45.1/45.3/45.4/45.5. Role guard
+// (requireRole(["SUPERADMIN"])) dilakukan di server action pemanggil
+// (app/(protected)/pengaturan/actions.ts), bukan di sini -- fungsi di sini
+// mempercayai `actor` yang diteruskan sudah lolos guard, sama seperti
+// pola createHoliday/deleteHoliday di atas.
+// ============================================================
+
+// Field yang aman ditampilkan ke UI -- TIDAK PERNAH menyertakan
+// fonteToken (Section 45.5: query list untuk UI tidak boleh
+// select fonteToken sama sekali).
+const SENDER_LIST_SELECT = {
+  id: true,
+  label: true,
+  phoneNumber: true,
+  status: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export type WhatsAppSenderSummary = {
+  id: string;
+  label: string;
+  phoneNumber: string;
+  status: "PENDING_SCAN" | "CONNECTED" | "DISCONNECTED";
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export async function listWhatsAppSenders(): Promise<WhatsAppSenderSummary[]> {
+  return prisma.whatsAppSender.findMany({
+    select: SENDER_LIST_SELECT,
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+function getFonnteAccountToken(): string {
+  const token = process.env.FONNTE_ACCOUNT_TOKEN;
+  if (!token) {
+    // Pesan jelas untuk admin (Section 33 Error Handling), bukan crash --
+    // dan TIDAK memengaruhi attendance/WhatsApp yang sudah berjalan lewat
+    // sender aktif existing (Section 45.7).
+    throw new PengaturanServiceError(
+      "Konfigurasi Fonnte belum lengkap, hubungi developer."
+    );
+  }
+  return token;
+}
+
+/**
+ * Langkah 1 alur tambah nomor (Section 45.3.1): buat device baru di Fonnte
+ * (pakai Account Token), simpan sender baru dengan status PENDING_SCAN,
+ * lalu ambil QR untuk ditampilkan ke admin. Device token dari Fonnte
+ * ditulis langsung ke database di sini -- TIDAK PERNAH dikembalikan ke
+ * client (Section 45.1, 45.5).
+ *
+ * Jika device berhasil dibuat tapi pengambilan QR gagal, sender TETAP
+ * disimpan (Section 45.3.1: "sender yang gagal discan tetap tersimpan,
+ * bisa di-generate ulang QR-nya") -- qrImageBase64 dikembalikan null
+ * dengan qrError berisi alasan, supaya admin bisa pakai "Scan Ulang".
+ */
+export async function createSenderAndGetQr(
+  input: CreateWhatsAppSenderInput,
+  actor: SessionUser
+): Promise<{
+  sender: WhatsAppSenderSummary;
+  qrImageBase64: string | null;
+  qrError?: string;
+}> {
+  const accountToken = getFonnteAccountToken();
+
+  const deviceResult = await fonnteClient.addDevice({
+    accountToken,
+    phoneNumber: input.phoneNumber,
+    label: input.label,
+  });
+
+  if (!deviceResult.ok) {
+    throw new PengaturanServiceError(`Gagal membuat device di Fonnte: ${deviceResult.reason}`);
+  }
+
+  const created = await prisma.whatsAppSender.create({
+    data: {
+      label: input.label,
+      phoneNumber: input.phoneNumber,
+      fonteToken: deviceResult.deviceToken,
+      status: "PENDING_SCAN",
+      isActive: false,
+      updatedById: actor.id,
+    },
+    select: SENDER_LIST_SELECT,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: actor.id,
+      action: "CREATE",
+      entity: "WhatsAppSender",
+      entityId: created.id,
+      description: `Menambahkan nomor pengirim WhatsApp: ${input.label} (${input.phoneNumber}), menunggu scan QR`,
+    },
+  });
+
+  const qrResult = await fonnteClient.getQr({ deviceToken: deviceResult.deviceToken });
+
+  if (!qrResult.ok) {
+    return { sender: created, qrImageBase64: null, qrError: qrResult.reason };
+  }
+
+  return { sender: created, qrImageBase64: qrResult.qrImageBase64 };
+}
+
+/**
+ * Generate ulang QR untuk sender yang sudah ada (PENDING_SCAN/DISCONNECTED)
+ * memakai device token yang sama -- TIDAK membuat device baru di Fonnte
+ * (Section 45.3.2 "Scan Ulang").
+ */
+export async function regenerateSenderQr(
+  senderId: string
+): Promise<{ qrImageBase64: string | null; qrError?: string }> {
+  const sender = await prisma.whatsAppSender.findUnique({ where: { id: senderId } });
+  if (!sender) {
+    throw new PengaturanServiceError("Nomor pengirim tidak ditemukan.");
+  }
+  if (sender.status === "CONNECTED") {
+    throw new PengaturanServiceError("Nomor ini sudah terhubung, tidak perlu scan ulang.");
+  }
+
+  const qrResult = await fonnteClient.getQr({ deviceToken: sender.fonteToken });
+  if (!qrResult.ok) {
+    return { qrImageBase64: null, qrError: qrResult.reason };
+  }
+  return { qrImageBase64: qrResult.qrImageBase64 };
+}
+
+/**
+ * Langkah polling (Section 45.3.1): dipanggil berulang dari client selagi
+ * modal QR terbuka. Cek status device ke Fonnte; begitu terdeteksi
+ * "connect", sender ini OTOMATIS diaktifkan (isActive = true) dan seluruh
+ * sender lain yang sebelumnya aktif otomatis dinonaktifkan -- semuanya
+ * dalam SATU $transaction supaya tidak pernah ada 2 sender isActive = true
+ * bersamaan (Section 45.1, 45.7).
+ *
+ * Endpoint polling ini hanya mengembalikan status/isActive, tidak pernah
+ * token (Section 45.5).
+ */
+export async function refreshSenderStatus(
+  senderId: string,
+  actor: SessionUser
+): Promise<WhatsAppSenderSummary> {
+  const sender = await prisma.whatsAppSender.findUnique({ where: { id: senderId } });
+  if (!sender) {
+    throw new PengaturanServiceError("Nomor pengirim tidak ditemukan.");
+  }
+
+  const statusResult = await fonnteClient.getDeviceStatus({ deviceToken: sender.fonteToken });
+  if (!statusResult.ok) {
+    // Gagal cek ke Fonnte (mis. timeout) -- jangan ubah apa pun, biarkan
+    // client polling lagi nanti. Bukan error yang perlu menghentikan alur.
+    console.error(
+      `[pengaturan-service] Gagal cek status sender ${sender.id}: ${statusResult.reason}`
+    );
+    return toSenderSummary(sender);
+  }
+
+  if (statusResult.status === "connect" && sender.status !== "CONNECTED") {
+    const activated = await prisma.$transaction(async (tx) => {
+      // Nonaktifkan seluruh sender lain yang sedang aktif (biasanya cuma
+      // satu, tapi query ini aman walau lebih dari satu secara tidak
+      // sengaja) SEBELUM mengaktifkan sender ini, supaya tidak pernah ada
+      // 2 sender isActive = true di waktu yang sama.
+      const previouslyActive = await tx.whatsAppSender.findMany({
+        where: { isActive: true, id: { not: sender.id } },
+      });
+
+      if (previouslyActive.length > 0) {
+        await tx.whatsAppSender.updateMany({
+          where: { id: { in: previouslyActive.map((s) => s.id) } },
+          data: { isActive: false, updatedById: actor.id },
+        });
+
+        for (const old of previouslyActive) {
+          await tx.auditLog.create({
+            data: {
+              userId: actor.id,
+              action: "UPDATE",
+              entity: "WhatsAppSender",
+              entityId: old.id,
+              description: `Nomor WhatsApp ${old.label} dinonaktifkan (digantikan ${sender.label})`,
+            },
+          });
+        }
+      }
+
+      const updated = await tx.whatsAppSender.update({
+        where: { id: sender.id },
+        data: { status: "CONNECTED", isActive: true, updatedById: actor.id },
+        select: SENDER_LIST_SELECT,
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: actor.id,
+          action: "UPDATE",
+          entity: "WhatsAppSender",
+          entityId: sender.id,
+          description: `Nomor WhatsApp ${sender.label} (${sender.phoneNumber}) terhubung & otomatis diaktifkan sebagai pengirim`,
+        },
+      });
+
+      return updated;
+    });
+
+    return activated;
+  }
+
+  // Sender yang SEBELUMNYA sudah CONNECTED tapi sekarang terdeteksi
+  // disconnect di sisi Fonnte (logout dari HP, sesi kedaluwarsa, dsb) --
+  // bukan bagian eksplisit dari alur "Tambah Nomor" di Section 45.3.1,
+  // tapi konsisten dengan definisi status DISCONNECTED di Section 45.1
+  // ("pernah connect, sekarang putus"). Ditandai di sini supaya dashboard
+  // sender tidak menampilkan status yang sudah basi.
+  if (statusResult.status === "disconnect" && sender.status === "CONNECTED") {
+    const updated = await prisma.whatsAppSender.update({
+      where: { id: sender.id },
+      data: { status: "DISCONNECTED", isActive: false, updatedById: actor.id },
+      select: SENDER_LIST_SELECT,
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: actor.id,
+        action: "UPDATE",
+        entity: "WhatsAppSender",
+        entityId: sender.id,
+        description: `Nomor WhatsApp ${sender.label} (${sender.phoneNumber}) terputus (terdeteksi saat cek status)`,
+      },
+    });
+
+    return updated;
+  }
+
+  // Masih PENDING_SCAN & belum connect -- tidak ada perubahan, client
+  // akan polling lagi.
+  return toSenderSummary(sender);
+}
+
+function toSenderSummary(sender: {
+  id: string;
+  label: string;
+  phoneNumber: string;
+  status: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}): WhatsAppSenderSummary {
+  return {
+    id: sender.id,
+    label: sender.label,
+    phoneNumber: sender.phoneNumber,
+    status: sender.status as WhatsAppSenderSummary["status"],
+    isActive: sender.isActive,
+    createdAt: sender.createdAt,
+    updatedAt: sender.updatedAt,
+  };
+}
+
+/**
+ * Tombol "Putuskan" (Section 45.3.2). Diizinkan untuk sender CONNECTED
+ * MANAPUN, termasuk yang sedang aktif -- sengaja lebih longgar daripada
+ * aturan hapus (Section 45.7): "putuskan" dipakai saat device bermasalah
+ * dan admin perlu segera menandainya, bukan operasi destruktif seperti
+ * hapus data. Jika sender yang diputuskan sedang aktif, sistem otomatis
+ * berakhir TANPA sender aktif sampai admin scan/aktifkan nomor lain --
+ * WhatsApp akan di-skip (attendance tetap SUCCESS, Section 7/45.2).
+ */
+export async function disconnectSender(
+  senderId: string,
+  actor: SessionUser
+): Promise<WhatsAppSenderSummary> {
+  const sender = await prisma.whatsAppSender.findUnique({ where: { id: senderId } });
+  if (!sender) {
+    throw new PengaturanServiceError("Nomor pengirim tidak ditemukan.");
+  }
+  if (sender.status !== "CONNECTED") {
+    throw new PengaturanServiceError("Nomor ini belum terhubung.");
+  }
+
+  const result = await fonnteClient.disconnectDevice({ deviceToken: sender.fonteToken });
+  if (!result.ok) {
+    throw new PengaturanServiceError(`Gagal memutuskan nomor di Fonnte: ${result.reason}`);
+  }
+
+  const updated = await prisma.whatsAppSender.update({
+    where: { id: sender.id },
+    data: { status: "DISCONNECTED", isActive: false, updatedById: actor.id },
+    select: SENDER_LIST_SELECT,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: actor.id,
+      action: "UPDATE",
+      entity: "WhatsAppSender",
+      entityId: sender.id,
+      description: `Memutuskan nomor pengirim WhatsApp: ${sender.label} (${sender.phoneNumber})`,
+    },
+  });
+
+  return updated;
+}
+
+/**
+ * Hard delete (Section 45.1: WhatsAppSender adalah data konfigurasi, bukan
+ * data historis absensi, jadi tidak tunduk aturan soft-delete Section 3.3).
+ * DITOLAK jika sender sedang isActive -- harus diputuskan/diganti aktifnya
+ * dulu. Jika masih CONNECTED saat dihapus, panggil Fonnte Disconnect Device
+ * lebih dulu (best-effort: kalau panggilan itu gagal, penghapusan baris
+ * konfigurasi TETAP dilanjutkan -- baris ini murni data kita, dan
+ * memblokir penghapusan hanya karena Fonnte sedang bermasalah akan
+ * menjebak admin; device yang menggantung di Fonnte harus diberesi manual
+ * lewat dashboard Fonnte pada kasus itu).
+ */
+export async function deleteSender(senderId: string, actor: SessionUser): Promise<void> {
+  const sender = await prisma.whatsAppSender.findUnique({ where: { id: senderId } });
+  if (!sender) {
+    throw new PengaturanServiceError("Nomor pengirim tidak ditemukan.");
+  }
+  if (sender.isActive) {
+    throw new PengaturanServiceError(
+      "Nomor ini sedang aktif. Putuskan atau aktifkan nomor lain terlebih dahulu sebelum menghapus."
+    );
+  }
+
+  if (sender.status === "CONNECTED") {
+    const result = await fonnteClient.disconnectDevice({ deviceToken: sender.fonteToken });
+    if (!result.ok) {
+      console.error(
+        `[pengaturan-service] Gagal disconnect device Fonnte saat hapus sender ${sender.id}: ${result.reason}`
+      );
+    }
+  }
+
+  await prisma.whatsAppSender.delete({ where: { id: sender.id } });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: actor.id,
+      action: "DELETE",
+      entity: "WhatsAppSender",
+      entityId: sender.id,
+      description: `Menghapus nomor pengirim WhatsApp: ${sender.label} (${sender.phoneNumber})`,
     },
   });
 }

@@ -1,5 +1,6 @@
 // lib/services/attendance-service.ts
 import { unstable_cache } from "next/cache";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   Prisma,
@@ -9,6 +10,30 @@ import {
   ClassStatus,
   AuditAction,
 } from "@/app/generated/prisma/client";
+import { notifyAttendance } from "@/lib/services/whatsapp-service";
+
+// Notifikasi WhatsApp (docs/whatsapp-blast.md) dijadwalkan lewat after() --
+// dijalankan SETELAH response dikirim ke client, bukan sebelum. Ini
+// memenuhi dua requirement sekaligus:
+// - Section 9: request Fonnte tidak boleh terjadi di dalam transaksi Prisma
+//   (di sini malah dijadwalkan setelah transaksi COMMIT DAN setelah
+//   response terkirim -- lebih ketat dari yang diminta, bukan pelanggaran).
+// - Section 29 & UX Scanner: feedback ke guru harus cepat -- guru tidak
+//   perlu menunggu request WhatsApp selesai untuk melihat hasil scan.
+// notifyAttendance() sendiri didesain tidak pernah throw (lihat
+// whatsapp-service.ts), tapi tetap dibungkus try/catch di sini sebagai
+// lapisan pertahanan tambahan (Section 8.1) -- error WhatsApp TIDAK BOLEH
+// membuat proses ini gagal, dan karena after() berjalan pasca-response,
+// error di sini juga tidak berpengaruh ke response yang sudah dikirim.
+function scheduleWhatsAppNotification(params: Parameters<typeof notifyAttendance>[0]) {
+  after(async () => {
+    try {
+      await notifyAttendance(params);
+    } catch (error) {
+      console.error("[AttendanceService] Gagal menjadwalkan notifikasi WhatsApp:", error);
+    }
+  });
+}
 
 // ============================================================
 // Types
@@ -453,6 +478,18 @@ export class AttendanceService {
         return created;
       });
 
+      // Hanya dipanggil pada jalur SUCCESS (Section 5.1 & 36 Acceptance
+      // Criteria) -- ALREADY_CHECKED_IN/STUDENT_NOT_FOUND/SCHOOL_CLOSED/dll
+      // TIDAK mengirim WhatsApp.
+      scheduleWhatsAppNotification({
+        type: "CHECK_IN",
+        studentName: student.name,
+        className: student.class.name,
+        whatsappNumber: student.whatsappNumber,
+        time: attendance.checkInAt.toISOString(),
+        status: attendance.status,
+      });
+
       return {
         type: "SUCCESS",
         student: toSummary(student),
@@ -564,6 +601,17 @@ export class AttendanceService {
             description: `Absen pulang ${student.name} (${student.class.name})`,
           },
         });
+      });
+
+      // Hanya dipanggil pada jalur SUCCESS (Section 5.2 & 36 Acceptance
+      // Criteria) -- ALREADY_CHECKED_OUT/NOT_CHECKED_IN/dll TIDAK mengirim
+      // WhatsApp.
+      scheduleWhatsAppNotification({
+        type: "CHECK_OUT",
+        studentName: student.name,
+        className: student.class.name,
+        whatsappNumber: student.whatsappNumber,
+        time: serverTime.toISOString(),
       });
 
       return {

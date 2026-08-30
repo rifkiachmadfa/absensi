@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizePhoneNumber } from "@/lib/utils/phone";
 
 // ============================================================
 // Akun Saya — ganti password (semua role)
@@ -79,3 +80,35 @@ export const holidaySchema = z.object({
 });
 
 export type HolidayInput = z.infer<typeof holidaySchema>;
+
+// ============================================================
+// Notifikasi WhatsApp — Nomor Pengirim (khusus SUPERADMIN)
+// docs/whatsapp-blast.md Section 45.1/45.3 — TIDAK ADA field token di
+// sini: fonteToken selalu hasil response Fonnte /add-device, tidak pernah
+// diketik admin (Section 45.1, 45.5).
+// ============================================================
+
+export const createWhatsAppSenderSchema = z.object({
+  label: z
+    .string()
+    .trim()
+    .min(1, "Label wajib diisi.")
+    .max(100, "Label maksimal 100 karakter."),
+  phoneNumber: z
+    .string()
+    .trim()
+    .min(1, "Nomor WhatsApp wajib diisi.")
+    .transform((value, ctx) => {
+      const normalized = normalizePhoneNumber(value);
+      if (!normalized) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Nomor WhatsApp tidak valid. Gunakan format 08xx, +62xx, atau 62xx.",
+        });
+        return z.NEVER;
+      }
+      return normalized;
+    }),
+});
+
+export type CreateWhatsAppSenderInput = z.infer<typeof createWhatsAppSenderSchema>;
