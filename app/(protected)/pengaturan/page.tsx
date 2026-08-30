@@ -3,6 +3,7 @@ import {
   listAttendanceSchedules,
   getDefaultSchedule,
   listHolidays,
+  listWhatsAppSenders,
 } from "@/lib/services/pengaturan-service";
 import { ChangePasswordForm } from "@/components/pengaturan/change-password-form";
 import { ThemeToggle } from "@/components/pengaturan/theme-toggle";
@@ -10,6 +11,7 @@ import { ScheduleDayRow } from "@/components/pengaturan/schedule-day-row";
 import { DefaultScheduleForm } from "@/components/pengaturan/default-schedule-form";
 import { HolidayForm } from "@/components/pengaturan/holiday-form";
 import { HolidayList } from "@/components/pengaturan/holiday-list";
+import { WhatsAppSenderList } from "@/components/pengaturan/whatsapp-sender-list";
 import {
   Tabs,
   TabsList,
@@ -21,13 +23,14 @@ export default async function PengaturanPage() {
   const actor = await requireAuth();
   const isSuperAdmin = actor.role === "SUPERADMIN";
 
-  const [schedules, defaultSchedule, holidays] = isSuperAdmin
+  const [schedules, defaultSchedule, holidays, whatsappSenders] = isSuperAdmin
     ? await Promise.all([
         listAttendanceSchedules(),
         getDefaultSchedule(),
         listHolidays(),
+        listWhatsAppSenders(),
       ])
-    : [null, null, null];
+    : [null, null, null, null];
 
   return (
     <div className="space-y-6">
@@ -47,6 +50,9 @@ export default async function PengaturanPage() {
           )}
           {isSuperAdmin && (
             <TabsTrigger value="libur">Hari Libur</TabsTrigger>
+          )}
+          {isSuperAdmin && (
+            <TabsTrigger value="whatsapp">Notifikasi WhatsApp</TabsTrigger>
           )}
         </TabsList>
 
@@ -132,6 +138,22 @@ export default async function PengaturanPage() {
             </div>
             <HolidayForm />
             <HolidayList holidays={holidays} />
+          </TabsContent>
+        )}
+
+        {isSuperAdmin && whatsappSenders && (
+          <TabsContent value="whatsapp" className="space-y-6 pt-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                Notifikasi WhatsApp
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Nomor WhatsApp sekolah yang mengirim notifikasi otomatis ke
+                orang tua/wali murid saat siswa check-in dan check-out.
+                Hanya satu nomor yang aktif mengirim pada satu waktu.
+              </p>
+            </div>
+            <WhatsAppSenderList senders={whatsappSenders} />
           </TabsContent>
         )}
       </Tabs>

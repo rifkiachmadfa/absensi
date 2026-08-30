@@ -110,7 +110,15 @@ export type AddDeviceResult =
   | { ok: false; reason: string };
 
 // Account Token (bukan device token) dipakai di sini -- lihat Section 45
-// "dua jenis token berbeda, jangan tertukar".
+// "dua jenis token berbeda, jangan tertukar" (docs.fonnte.com/account-token:
+// account token dipakai khusus untuk add/update/delete device & get-devices,
+// device token dipakai untuk semua operasi milik satu device seperti
+// send/qr/device-profile/disconnect).
+//
+// Catatan bisnis Fonnte (docs.fonnte.com/api-add-device): akun free hanya
+// bisa membuat maks. 10 device, dan hanya 1 di antaranya yang boleh
+// terhubung (connect) dalam satu waktu -- relevan kalau sekolah masih
+// pakai paket free saat mencoba multi-sender.
 export async function addDevice(params: {
   accountToken: string;
   phoneNumber: string;
@@ -148,17 +156,29 @@ export type GetQrResult =
   | { ok: false; reason: string };
 
 // Dipanggil pakai device token (bukan account token) -- QR khusus device
-// yang baru dibuat oleh addDevice().
+// yang baru dibuat oleh addDevice(). Field `type: "qr"` dikirim eksplisit
+// (walau itu default Fonnte) supaya tidak diam-diam berubah ke mode "code"
+// (docs.fonnte.com/api-get-qr).
 export async function getQr(params: { deviceToken: string }): Promise<GetQrResult> {
   try {
-    const { ok, json } = await fonnteFetch("/qr", { token: params.deviceToken });
+    const { ok, json } = await fonnteFetch("/qr", {
+      token: params.deviceToken,
+      body: { type: "qr" },
+    });
 
+    // Field resmi dari Fonnte adalah "url" (base64 PNG), BUKAN "qr" --
+    // fallback ke "qr" tetap dijaga untuk berjaga-jaga kalau API berubah.
     const qr =
-      (typeof json?.qr === "string" && json.qr) ||
       (typeof json?.url === "string" && json.url) ||
+      (typeof json?.qr === "string" && json.qr) ||
       null;
 
     if (!ok || !qr) {
+      // Salah satu kemungkinan "reason": "device already connect" --
+      // device ini sebenarnya sudah terhubung (tidak perlu QR lagi).
+      // Polling status (getDeviceStatus) di refreshSenderStatus() akan
+      // tetap mendeteksi & mengaktifkan sender ini pada tick berikutnya,
+      // jadi qrError di sini cukup ditampilkan apa adanya ke admin.
       const reason =
         (typeof json?.reason === "string" && json.reason) || "Fonnte gagal mengambil QR code.";
       return { ok: false, reason };
@@ -203,24 +223,35 @@ export async function getDeviceStatus(params: {
 
 export type DisconnectDeviceResult = { ok: true } | { ok: false; reason: string };
 
-// NOTE: Fonnte tidak mendokumentasikan endpoint "disconnect device" terpisah
-// secara eksplisit di docs publik -- yang tersedia adalah /delete-device
-// (menghapus device sepenuhnya dari akun). Karena WhatsAppSender.status
-// DISCONNECTED di sistem kita berarti "tidak dipakai kirim pesan, tapi
-// barisnya tetap ada" (bukan device dihapus dari Fonnte), fungsi ini perlu
-// diverifikasi ulang terhadap dashboard Fonnte akun sekolah sebelum dipakai
-// di alur "Putuskan" (Section 45.3.2) -- lihat TODO di pengaturan-service.ts
-// saat langkah itu diimplementasikan. Untuk sekarang endpoint yang dipanggil
-// adalah /delete-device sesuai API yang terdokumentasi.
+// Endpoint resmi Fonnte untuk disconnect (docs.fonnte.com/api-disconnect-device):
+// POST /disconnect, pakai device token, TIDAK butuh body apa pun. Device
+// tetap terdaftar di akun Fonnte (cuma logout dari WhatsApp) -- inilah
+// yang dipakai untuk "Putuskan" (Section 45.3.2) maupun best-effort
+// cleanup saat hapus sender (Section 45.1).
+//
+// PENTING -- ini BUKAN /delete-device. /delete-device benar-benar
+// menghapus device dari akun Fonnte SECARA PERMANEN dan mensyaratkan kode
+// OTP yang dikirim ke WhatsApp pemilik akun (docs.fonnte.com/api-delete-device)
+// -- tidak bisa diotomasi tanpa campur tangan manusia memasukkan OTP.
+// Karena itu penghapusan device Fonnte sepenuhnya TIDAK diotomasi di sini;
+// yang kita lakukan hanya disconnect (device tetap ada di akun Fonnte,
+// harus dibereskan manual lewat dashboard Fonnte kalau memang ingin
+// dihapus total -- lihat catatan di deleteSender() pengaturan-service.ts).
+//
+// Response sukses: { "detail": "device disconnected", "status": true }
+// Response gagal : { "detail": "device already disconnected"/"token invalid", "status": false }
+// (field pesannya "detail", BUKAN "reason", beda dari kebanyakan endpoint lain).
 export async function disconnectDevice(params: {
   deviceToken: string;
 }): Promise<DisconnectDeviceResult> {
   try {
-    const { ok, json } = await fonnteFetch("/delete-device", { token: params.deviceToken });
+    const { ok, json } = await fonnteFetch("/disconnect", { token: params.deviceToken });
 
     if (!ok || json?.status === false) {
       const reason =
-        (typeof json?.reason === "string" && json.reason) || "Fonnte gagal memutuskan device.";
+        (typeof json?.detail === "string" && json.detail) ||
+        (typeof json?.reason === "string" && json.reason) ||
+        "Fonnte gagal memutuskan device.";
       return { ok: false, reason };
     }
 
