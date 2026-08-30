@@ -5,7 +5,8 @@
 //
 // Keamanan:
 // - Rate-limited PER IP (bukan per user, karena endpoint ini publik/anonim).
-// - Hanya mengembalikan id + nama + nama kelas, TIDAK NIS/NISN/qrToken.
+// - Mengembalikan id + nama + nama kelas + NIS (untuk seed avatar DiceBear,
+//   lihat catatan di searchStudentsPublic()). TIDAK NISN/qrToken.
 // - Query minimal 2 karakter, hasil dibatasi 10 baris.
 import { NextRequest, NextResponse } from "next/server";
 import { searchStudentsPublic } from "@/lib/services/siswa-service";
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
     students: students.map((s) => ({
       id: s.id,
       name: s.name,
+      nis: s.nis,
       className: s.class.name,
     })),
   });

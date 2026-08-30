@@ -11,6 +11,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { StudentAvatar } from "@/components/siswa/student-avatar";
 import type { LowAttendanceLeaderboardPayload } from "@/lib/services/report-service";
 
 // Modern School — UI_RULES §5 (Status Colors): ini kebalikan dari
@@ -26,13 +27,6 @@ const RANK_BADGE_STYLE = [
   "bg-[#F1F5F5] text-[#48616A] border border-[#DCE7E9]", // #4
   "bg-[#F1F5F5] text-[#48616A] border border-[#DCE7E9]", // #5
 ];
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (first + last).toUpperCase();
-}
 
 export function LowAttendanceLeaderboard({
   leaderboards,
@@ -103,9 +97,7 @@ export function LowAttendanceLeaderboard({
                   {i + 1}
                 </span>
 
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EAF7F8] text-[13px] font-semibold text-[#17586F]">
-                  {initials(row.name)}
-                </span>
+                <StudentAvatar nis={row.nis} name={row.name} size={36} />
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium text-[#17313A]">

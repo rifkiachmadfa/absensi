@@ -10,8 +10,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, ChevronRight, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { StudentAvatar } from "@/components/siswa/student-avatar";
 
-type PublicStudentResult = { id: string; name: string; className: string };
+type PublicStudentResult = { id: string; name: string; nis: string; className: string };
 
 const DEBOUNCE_MS = 300;
 
@@ -97,14 +98,7 @@ export function PublicStudentSearch() {
                 onClick={() => router.push(`/cek-kehadiran/${s.id}`)}
                 className="flex w-full items-center gap-3 bg-white px-3 py-2.5 text-left transition-colors hover:bg-[#F8FAFA]"
               >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#EAF7F8] text-[11px] font-semibold text-[#17586F]">
-                  {s.name
-                    .split(" ")
-                    .slice(0, 2)
-                    .map((part) => part[0])
-                    .join("")
-                    .toUpperCase()}
-                </span>
+                <StudentAvatar nis={s.nis} name={s.name} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-[#17313A]">
                     {s.name}

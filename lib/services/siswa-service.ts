@@ -112,12 +112,22 @@ export async function getStudentsForCardPrint(params: { classId?: string }) {
  * Pencarian siswa untuk halaman PUBLIK (root "/" & /cek-kehadiran) --
  * dipakai oleh orang tua/umum TANPA login untuk menemukan anaknya.
  *
- * Sengaja HANYA mengembalikan id, nama, dan nama kelas -- TIDAK NIS/NISN
- * ataupun data sensitif lain. Endpoint yang memanggil fungsi ini WAJIB
- * rate-limited (lihat app/api/publik/cari-siswa).
+ * Mengembalikan id, nama, nama kelas, dan NIS. NIS diikutkan (bukan
+ * sensitif -- lihat catatan di bawah) supaya avatar hasil pencarian bisa
+ * memakai seed yang SAMA dengan avatar di Kartu Siswa (DiceBear seed =
+ * NIS, lihat lib/kartu-siswa/avatar.ts), bukan lagi lingkaran inisial
+ * teks. NISN tetap TIDAK dikembalikan karena lebih sensitif (dipakai
+ * untuk verifikasi identitas di beberapa sistem lain).
+ *
+ * Catatan: NIS pada dasarnya sudah tampil sebagai teks biasa (tanpa
+ * login) di leaderboard halaman publik yang sama (lihat "NIS {row.nis}"
+ * di komponen dashboard/*-leaderboard.tsx yang direuse di app/page.tsx),
+ * jadi menyertakannya di sini tidak menambah eksposur data baru.
  *
  * Hanya siswa berstatus ACTIVE yang muncul, dan query minimal 2 karakter
- * supaya tidak dipakai untuk "membrowsing" seluruh data siswa.
+ * supaya tidak dipakai untuk "membrowsing" seluruh data siswa. Endpoint
+ * yang memanggil fungsi ini WAJIB rate-limited (lihat
+ * app/api/publik/cari-siswa).
  */
 export async function searchStudentsPublic(query: string) {
   const trimmed = query.trim();
@@ -135,6 +145,7 @@ export async function searchStudentsPublic(query: string) {
     select: {
       id: true,
       name: true,
+      nis: true,
       class: { select: { name: true } },
     },
     orderBy: { name: "asc" },
