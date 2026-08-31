@@ -7,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardAction,
   CardContent,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -48,28 +47,31 @@ export function LowAttendanceLeaderboard({
 
   return (
     <Card className="h-full rounded-xl border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-[18px] font-semibold text-[#17313A]">
-          <TrendingDown className="h-[18px] w-[18px] text-[#DC2626]" />
-          Top 5 Kehadiran Terendah
-        </CardTitle>
-        <CardDescription className="text-[13px] text-[#71858C]">
-          Penilaian bulanan (bukan harian) · {active.monthLabel}
-        </CardDescription>
-        <CardAction>
-          <select
-            value={monthIndex}
-            onChange={(e) => setMonthIndex(Number(e.target.value))}
-            className="h-9 rounded-[10px] border border-[#DCE7E9] bg-white px-3 text-[13px] text-[#17313A] outline-none focus:border-[#22949E]"
-            aria-label="Pilih bulan penilaian"
-          >
-            {monthOptions.map((opt) => (
-              <option key={opt.value} value={opt.index}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </CardAction>
+      {/* Header di-stack vertikal di mobile lalu jadi baris di layar >= sm --
+          lihat catatan di DisciplineLeaderboard untuk alasan tidak memakai
+          CardAction (grid-cols-[1fr_auto] bawaan CardHeader). */}
+      <CardHeader className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle className="flex items-center gap-2 text-[18px] font-semibold text-[#17313A]">
+            <TrendingDown className="h-[18px] w-[18px] shrink-0 text-[#DC2626]" />
+            <span className="truncate">Top 5 Kehadiran Terendah</span>
+          </CardTitle>
+          <CardDescription className="mt-1 text-[13px] text-[#71858C]">
+            Penilaian bulanan (bukan harian) · {active.monthLabel}
+          </CardDescription>
+        </div>
+        <select
+          value={monthIndex}
+          onChange={(e) => setMonthIndex(Number(e.target.value))}
+          className="h-9 w-full shrink-0 rounded-[10px] border border-[#DCE7E9] bg-white px-3 text-[13px] text-[#17313A] outline-none focus:border-[#22949E] sm:w-auto"
+          aria-label="Pilih bulan penilaian"
+        >
+          {monthOptions.map((opt) => (
+            <option key={opt.value} value={opt.index}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </CardHeader>
 
       <CardContent>

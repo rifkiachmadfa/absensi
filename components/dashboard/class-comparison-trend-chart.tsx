@@ -245,20 +245,24 @@ export function ClassComparisonTrendChart({
         </div>
       )}
 
-      {/* flex-1: mengisi sisa tinggi Card (Card sudah h-full mengikuti baris
-          grid), supaya tinggi card ini sejajar dengan card Top 5 Murid Paling
-          Disiplin di sebelahnya, bukan cuma setinggi konten. */}
-      <CardContent className="flex flex-1 flex-col">
+      {/* Tinggi kanvas dibuat EKSPLISIT (bukan h-full/flex-1) supaya sama
+          persis dengan pola AttendanceTrendChart yang sudah rapi di semua
+          breakpoint. Rantai h-full/flex-1 sebelumnya bergantung pada tinggi
+          baris grid, yang di mobile (grid 1 kolom -- card ini & Top 5 Murid
+          Paling Disiplin jadi baris terpisah, bukan saling stretch) tidak
+          punya tinggi pasti untuk direferensikan, sehingga canvas Chart.js
+          bisa salah ukur lebar/tinggi saat pertama kali dirender. */}
+      <CardContent className="flex flex-col">
         {data.series.length === 0 ? (
-          <p className="flex flex-1 items-center justify-center text-center text-sm text-[#71858C]">
+          <p className="flex h-[240px] items-center justify-center text-center text-sm text-[#71858C] sm:h-[280px]">
             Belum ada data kelas untuk ditampilkan.
           </p>
         ) : activeSeries.length === 0 ? (
-          <p className="flex flex-1 items-center justify-center text-center text-sm text-[#71858C]">
+          <p className="flex h-[240px] items-center justify-center text-center text-sm text-[#71858C] sm:h-[280px]">
             Pilih minimal satu kelas untuk menampilkan grafik.
           </p>
         ) : (
-          <div className="h-full min-h-[240px] w-full flex-1 sm:min-h-[260px]">
+          <div className="h-[240px] w-full sm:h-[280px]">
             <canvas
               ref={canvasRef}
               role="img"

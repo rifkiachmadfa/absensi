@@ -7,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardAction,
   CardContent,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -44,30 +43,36 @@ export function DisciplineLeaderboard({
 
   return (
     <Card className="h-full rounded-xl border-[#DCE7E9] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-[18px] font-semibold text-[#17313A]">
-          <Trophy className="h-[18px] w-[18px] text-[#22949E]" />
-          Top 5 Murid Paling Disiplin
-        </CardTitle>
-        <CardDescription className="text-[13px] text-[#71858C]">
-          Penilaian bulanan (bukan harian) · {active.monthLabel}
-        </CardDescription>
-        <CardAction>
-          {/* Pemilih bulan -- native <select> supaya ringkas & aksesibel,
-              opsinya "Agustus 2026, Juli 2026, ..." dari getDisciplineMonthOptions() */}
-          <select
-            value={monthIndex}
-            onChange={(e) => setMonthIndex(Number(e.target.value))}
-            className="h-9 rounded-[10px] border border-[#DCE7E9] bg-white px-3 text-[13px] text-[#17313A] outline-none focus:border-[#22949E]"
-            aria-label="Pilih bulan penilaian"
-          >
-            {monthOptions.map((opt) => (
-              <option key={opt.value} value={opt.index}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </CardAction>
+      {/* Header di-stack vertikal di mobile lalu jadi baris di layar >= sm --
+          BUKAN memakai CardAction (grid-cols-[1fr_auto] bawaan CardHeader),
+          karena kombinasi kolom "1fr" berisi judul+ikon (flex, min-width:auto)
+          dengan kolom "auto" berisi <select> membuat card ini sedikit lebih
+          lebar dari sibling-nya di mobile. Pola flex-col/sm:flex-row ini
+          identik dengan yang dipakai AttendanceTrendChart (yang sudah rapi). */}
+      <CardHeader className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle className="flex items-center gap-2 text-[18px] font-semibold text-[#17313A]">
+            <Trophy className="h-[18px] w-[18px] shrink-0 text-[#22949E]" />
+            <span className="truncate">Top 5 Murid Paling Disiplin</span>
+          </CardTitle>
+          <CardDescription className="mt-1 text-[13px] text-[#71858C]">
+            Penilaian bulanan (bukan harian) · {active.monthLabel}
+          </CardDescription>
+        </div>
+        {/* Pemilih bulan -- native <select> supaya ringkas & aksesibel,
+            opsinya "Agustus 2026, Juli 2026, ..." dari getDisciplineMonthOptions() */}
+        <select
+          value={monthIndex}
+          onChange={(e) => setMonthIndex(Number(e.target.value))}
+          className="h-9 w-full shrink-0 rounded-[10px] border border-[#DCE7E9] bg-white px-3 text-[13px] text-[#17313A] outline-none focus:border-[#22949E] sm:w-auto"
+          aria-label="Pilih bulan penilaian"
+        >
+          {monthOptions.map((opt) => (
+            <option key={opt.value} value={opt.index}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </CardHeader>
 
       <CardContent>
