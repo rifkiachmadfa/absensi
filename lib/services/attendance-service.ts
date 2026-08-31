@@ -1,5 +1,6 @@
 // lib/services/attendance-service.ts
 import { unstable_cache } from "next/cache";
+import { ATTENDANCE_TODAY_STATS_TAG } from "@/lib/cache/tags";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -1344,12 +1345,15 @@ async function fetchRecentActivity(
 
 const getCachedDailyRecap = unstable_cache(fetchDailyRecap, ["daily-recap"], {
   revalidate: TODAY_STATS_CACHE_SECONDS,
+  tags: [ATTENDANCE_TODAY_STATS_TAG],
 });
 
 const getCachedClassBreakdown = unstable_cache(fetchClassBreakdown, ["class-breakdown"], {
   revalidate: TODAY_STATS_CACHE_SECONDS,
+  tags: [ATTENDANCE_TODAY_STATS_TAG],
 });
 
 const getCachedRecentActivity = unstable_cache(fetchRecentActivity, ["recent-activity"], {
   revalidate: TODAY_STATS_CACHE_SECONDS,
+  tags: [ATTENDANCE_TODAY_STATS_TAG],
 });

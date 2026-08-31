@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { ATTENDANCE_TODAY_STATS_TAG, ATTENDANCE_TREND_TAG } from "@/lib/cache/tags";
 import { prisma } from "@/lib/prisma";
 import {
   AttendanceStatus,
@@ -621,19 +622,29 @@ function buildTrendCounts(
 }
 
 // Grafik trend (harian & bulanan) dipanggil di /dashboard DAN halaman publik
-// "/" -- keduanya di-regenerate tiap ada aksi absensi lewat revalidatePath("/")
-// (lihat lib/cache/public-dashboard.ts). Tanpa cache, tiap regenerasi menembak
-// ulang query attendance penuh; saat jam masuk sekolah ramai ini bisa memicu
-// burst query bersamaan dan menghabiskan connection pool (max: 10 per
-// instance, lihat lib/prisma.ts). 20 detik cukup segar untuk sebuah chart
-// (bukan angka "live"), sekaligus meredam burst.
+// "/". Keduanya dipicu untuk refresh via notifyPublicDashboardChanged() ->
+// revalidateTag(ATTENDANCE_TREND_TAG) tiap ada aksi absensi (lihat
+// lib/cache/public-dashboard.ts) -- revalidatePath("/") saja TIDAK cukup
+// karena unstable_cache() di sini adalah entry Data Cache yang berdiri
+// sendiri, tidak otomatis ikut ter-invalidate hanya karena path "/"
+// di-revalidate (apalagi /dashboard, yang bahkan tidak pernah kena
+// revalidatePath("/") sama sekali -- itulah kenapa chart di /dashboard
+// terasa macet sebelumnya walau recent-activity sudah terlihat update).
+// TTL 20 detik di sini adalah lapisan pertahanan kedua (burst protection),
+// bukan mekanisme invalidasi utama.
 const TREND_CACHE_SECONDS = 20;
 
 async function fetchAttendanceTrend(
   mode: TrendMode,
-  classId: string | null
+  classId: string | null,
+  today: string // ISO date-only, WAJIB diteruskan sebagai argumen eksplisit
+  // (bukan dihitung di dalam function) supaya ikut membentuk cache key
+  // unstable_cache -- pola yang sama seperti fetchLateRecapToday di bawah.
+  // Tanpa ini, cache key hanya bergantung pada (mode, classId), sehingga
+  // hasil yang dihitung tengah malam bisa "menempel" dan masih terpakai
+  // esok harinya sampai TTL/tag revalidation berikutnya.
 ): Promise<AttendanceTrendPayload> {
-  const today = getTodayDateOnly();
+  const todayDate = new Date(`${today}T00:00:00.000Z`);
 
   const students = await prisma.student.findMany({
     where: { status: StudentStatus.ACTIVE, ...(classId ? { classId } : {}) },
@@ -651,12 +662,12 @@ async function fetchAttendanceTrend(
     // hari libur untuk jendela mundur yang cukup lebar (90 hari kalender --
     // jauh lebih dari cukup untuk menampung 14 hari sekolah + hari libur di
     // dalamnya) sekali di awal, supaya loop mundur tidak query per-hari.
-    const lookbackStart = new Date(today);
+    const lookbackStart = new Date(todayDate);
     lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 90);
-    const holidaySet = await getHolidayDateSet(lookbackStart, today);
+    const holidaySet = await getHolidayDateSet(lookbackStart, todayDate);
 
     const schoolDates: Date[] = [];
-    const cursor = new Date(today);
+    const cursor = new Date(todayDate);
     while (schoolDates.length < DAILY_TREND_POINTS) {
       if (!isWeekendDate(cursor) && !holidaySet.has(toISODateOnly(cursor))) {
         schoolDates.unshift(new Date(cursor));
@@ -703,14 +714,14 @@ async function fetchAttendanceTrend(
   // mode === "monthly"
   const monthStarts: Date[] = [];
   for (let i = MONTHLY_TREND_POINTS - 1; i >= 0; i--) {
-    monthStarts.push(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i, 1)));
+    monthStarts.push(new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth() - i, 1)));
   }
 
-  const monthlyHolidaySet = await getHolidayDateSet(monthStarts[0], today);
+  const monthlyHolidaySet = await getHolidayDateSet(monthStarts[0], todayDate);
 
   const attendances = await prisma.attendance.findMany({
     where: {
-      date: { gte: monthStarts[0], lte: today },
+      date: { gte: monthStarts[0], lte: todayDate },
       studentId: { in: studentIds },
     },
     select: { date: true, status: true },
@@ -720,7 +731,7 @@ async function fetchAttendanceTrend(
     const monthEndRequested = new Date(
       Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)
     );
-    const monthEnd = monthEndRequested.getTime() > today.getTime() ? today : monthEndRequested;
+    const monthEnd = monthEndRequested.getTime() > todayDate.getTime() ? todayDate : monthEndRequested;
     const schoolDays = countSchoolDays(monthStart, monthEnd, monthlyHolidaySet);
 
     const inMonth = attendances.filter(
@@ -743,14 +754,15 @@ async function fetchAttendanceTrend(
 const getCachedAttendanceTrend = unstable_cache(
   fetchAttendanceTrend,
   ["attendance-trend"],
-  { revalidate: TREND_CACHE_SECONDS }
+  { revalidate: TREND_CACHE_SECONDS, tags: [ATTENDANCE_TREND_TAG] }
 );
 
 export async function getAttendanceTrend(params: {
   mode: TrendMode;
   classId?: string;
 }): Promise<AttendanceTrendPayload> {
-  return getCachedAttendanceTrend(params.mode, params.classId ?? null);
+  const today = toISODateOnly(getTodayDateOnly());
+  return getCachedAttendanceTrend(params.mode, params.classId ?? null, today);
 }
 
 export async function getReportClassOptions() {
@@ -1242,6 +1254,7 @@ async function fetchLateRecapToday(
 
 const getCachedLateRecapToday = unstable_cache(fetchLateRecapToday, ["late-recap-today"], {
   revalidate: LATE_RECAP_CACHE_SECONDS,
+  tags: [ATTENDANCE_TODAY_STATS_TAG],
 });
 
 export async function getLateRecapToday(
