@@ -213,17 +213,45 @@ export async function getHolidayDateSet(start: Date, end: Date): Promise<Set<str
   return new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
 }
 
-async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<AttendanceStatus> {
+// AttendanceSchedule (per hari) & SchoolSetting (fallback) HAMPIR TIDAK
+// PERNAH berubah dalam satu hari berjalan -- keduanya cuma diubah admin
+// lewat /pengaturan (lihat upsertAttendanceSchedule/updateDefaultSchedule
+// di pengaturan-service.ts), bukan oleh proses scan. Sebelumnya
+// resolveStatus() query ulang KEDUANYA di *setiap* scan (1-2 round trip DB
+// tiap panggilan) padahal hasilnya nyaris selalu sama sepanjang hari --
+// jadi dicache di sini per dayOfWeek. SCHEDULE_CACHE_SECONDS sengaja lebih
+// panjang dari TODAY_STATS_CACHE_SECONDS (statistik dashboard, yang memang
+// harus terasa "real-time") karena jadwal absensi bukan angka yang
+// berubah-ubah -- 60 detik basi masih jauh lebih aman daripada 10 detik
+// basi untuk data statistik.
+//
+// SCHEDULE_CACHE_TAG diekspor supaya pengaturan-service.ts bisa
+// revalidateTag() begitu admin menyimpan perubahan jadwal/setting --
+// perubahan admin jadi terasa SEGERA (tidak perlu menunggu 60 detik) tanpa
+// mengorbankan cache untuk scan biasa.
+export const SCHEDULE_CACHE_TAG = "attendance-schedule";
+const SCHEDULE_CACHE_SECONDS = 60;
+
+async function fetchScheduleForDay(dayOfWeek: number): Promise<{ lateAfter: string }> {
   const daySchedule = await prisma.attendanceSchedule.findFirst({
     where: { dayOfWeek, isActive: true },
   });
 
   if (daySchedule) {
-    return hhmm <= daySchedule.lateAfter ? AttendanceStatus.HADIR : AttendanceStatus.TERLAMBAT;
+    return { lateAfter: daySchedule.lateAfter };
   }
 
   const setting = await prisma.schoolSetting.findFirst();
-  const lateAfter = setting?.lateAfter ?? "07:15";
+  return { lateAfter: setting?.lateAfter ?? "07:15" };
+}
+
+const getCachedScheduleForDay = unstable_cache(fetchScheduleForDay, ["schedule-for-day"], {
+  revalidate: SCHEDULE_CACHE_SECONDS,
+  tags: [SCHEDULE_CACHE_TAG],
+});
+
+async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<AttendanceStatus> {
+  const { lateAfter } = await getCachedScheduleForDay(dayOfWeek);
   return hhmm <= lateAfter ? AttendanceStatus.HADIR : AttendanceStatus.TERLAMBAT;
 }
 
@@ -385,29 +413,43 @@ export class AttendanceService {
   }): Promise<IdentifyResult> {
     const { method } = params;
     const identifier = normalizeIdentifier(params.identifier, method);
+    const date = getTodayDateOnly();
 
-    // Sabtu/Minggu ATAU hari libur yang diatur admin (lihat isNonSchoolDay).
-    // Dicek PALING AWAL, sebelum query siswa apapun, supaya tidak ada
-    // absensi (atau bahkan identifikasi) yang bisa lolos di hari libur
-    // lewat jalur legacy ini.
-    if (await isNonSchoolDay(getTodayDateOnly())) {
+    // isNonSchoolDay() (baca tabel Holiday) & pencarian siswa TIDAK saling
+    // bergantung -- dulu di-await berurutan, sekarang paralel. Kalau
+    // ternyata hari libur, hasil query siswa dibuang begitu saja -- ini
+    // trade-off yang wajar: hari libur jauh lebih jarang daripada hari
+    // sekolah biasa, jadi yang harus dioptimalkan adalah kasus paling
+    // sering (hari sekolah), bukan kasus paling jarang.
+    const [nonSchoolDay, student] = await Promise.all([
+      isNonSchoolDay(date),
+      prisma.student.findFirst({
+        where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+        include: { class: true },
+      }),
+    ]);
+
+    if (nonSchoolDay) {
       return { type: "SCHOOL_CLOSED" };
     }
-
-    const student = await prisma.student.findFirst({
-      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
-      include: { class: true },
-    });
 
     if (!student) return { type: "STUDENT_NOT_FOUND" };
     if (student.status !== StudentStatus.ACTIVE) {
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
-    const date = getTodayDateOnly();
-    const existing = await prisma.attendance.findUnique({
-      where: { studentId_date: { studentId: student.id, date } },
-    });
+    const { dayOfWeek, hhmm } = getJakartaNow();
+
+    // Cek "sudah absen hari ini?" & hitung suggestedStatus TIDAK saling
+    // bergantung -- jalankan paralel juga. resolveStatus() sendiri sekarang
+    // dicache (lihat getCachedScheduleForDay di bawah class ini), jadi pada
+    // kasus umum panggilan ini bahkan tidak menyentuh database sama sekali.
+    const [existing, suggestedStatus] = await Promise.all([
+      prisma.attendance.findUnique({
+        where: { studentId_date: { studentId: student.id, date } },
+      }),
+      resolveStatus(dayOfWeek, hhmm),
+    ]);
 
     if (existing) {
       return {
@@ -417,9 +459,6 @@ export class AttendanceService {
         status: existing.status,
       };
     }
-
-    const { dayOfWeek, hhmm } = getJakartaNow();
-    const suggestedStatus = await resolveStatus(dayOfWeek, hhmm);
 
     return { type: "SUCCESS", student: toSummary(student), suggestedStatus };
   }
@@ -447,30 +486,56 @@ export class AttendanceService {
   }): Promise<CheckInResult> {
     const { method, recordedById } = params;
     const identifier = normalizeIdentifier(params.identifier, method);
+    const date = getTodayDateOnly();
+
+    // Poin 3 (audit performa): isNonSchoolDay() (baca tabel Holiday) &
+    // pencarian siswa TIDAK saling bergantung satu sama lain -- dulu
+    // di-await berurutan (2 round trip DB berurutan), sekarang dijalankan
+    // paralel lewat Promise.all (1 "round trip" -- keduanya nunggu
+    // bersamaan). Kalau ternyata hari libur, hasil query siswa dibuang --
+    // trade-off yang wajar karena hari libur jauh lebih jarang daripada
+    // hari sekolah biasa; yang harus paling cepat justru kasus tersering
+    // (hari sekolah, siswa valid).
+    const [nonSchoolDay, student] = await Promise.all([
+      isNonSchoolDay(date),
+      prisma.student.findFirst({
+        where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+        include: { class: true },
+      }),
+    ]);
 
     // Sabtu/Minggu ATAU hari libur yang diatur admin (Section 11 & 30 --
     // siswa yang tidak sekolah bukan berarti ALPHA, dan hari libur bukan
-    // hari sekolah sama sekali). Dicek paling awal, sebelum query siswa,
-    // supaya TIDAK ADA jalur (QR ataupun manual) yang bisa membuat record
+    // hari sekolah sama sekali). Dicek sebelum apa pun disimpan, supaya
+    // TIDAK ADA jalur (QR ataupun manual) yang bisa membuat record
     // Attendance di hari non-sekolah.
-    if (await isNonSchoolDay(getTodayDateOnly())) {
+    if (nonSchoolDay) {
       return { type: "SCHOOL_CLOSED" };
     }
-
-    const student = await prisma.student.findFirst({
-      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
-      include: { class: true },
-    });
 
     if (!student) return { type: "STUDENT_NOT_FOUND" };
     if (student.status !== StudentStatus.ACTIVE) {
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
-    const date = getTodayDateOnly();
-    const existing = await prisma.attendance.findUnique({
-      where: { studentId_date: { studentId: student.id, date } },
-    });
+    // Waktu & status SELALU dihitung dari server (Section 3.1), tidak pernah
+    // dipercayakan ke client. dayOfWeek/hhmm murni komputasi lokal (tidak ada
+    // I/O), jadi aman dihitung di sini sebelum query berikutnya.
+    const { serverTime, dayOfWeek, hhmm } = getJakartaNow();
+
+    // Poin 3: cek "sudah absen hari ini?" & hitung status (HADIR/TERLAMBAT)
+    // JUGA tidak saling bergantung -- dulu berurutan (findUnique lalu
+    // resolveStatus, yang di dalamnya sendiri masih 1-2 query lagi),
+    // sekarang paralel. resolveStatus() sekarang lewat cache
+    // (getCachedScheduleForDay, lihat bawah class ini) supaya pada kasus
+    // umum bahkan TIDAK menyentuh database sama sekali -- AttendanceSchedule
+    // & SchoolSetting nyaris tidak pernah berubah dalam satu hari berjalan.
+    const [existing, status] = await Promise.all([
+      prisma.attendance.findUnique({
+        where: { studentId_date: { studentId: student.id, date } },
+      }),
+      resolveStatus(dayOfWeek, hhmm),
+    ]);
 
     if (existing) {
       return {
@@ -480,13 +545,6 @@ export class AttendanceService {
         status: existing.status,
       };
     }
-
-    // Waktu & status SELALU dihitung dari server (Section 3.1), tidak pernah
-    // dipercayakan ke client, dan diambil di sini -- sedekat mungkin dengan
-    // penyimpanan -- supaya jam yang dipakai untuk menentukan status sama
-    // persis dengan jam yang tersimpan sebagai checkInAt.
-    const { serverTime, dayOfWeek, hhmm } = getJakartaNow();
-    const status = await resolveStatus(dayOfWeek, hhmm);
 
     try {
       const attendance = await prisma.$transaction(async (tx) => {
@@ -575,24 +633,29 @@ export class AttendanceService {
   }): Promise<CheckOutResult> {
     const { method, recordedById } = params;
     const identifier = normalizeIdentifier(params.identifier, method);
+    const date = getTodayDateOnly();
+
+    // isNonSchoolDay() & pencarian siswa tidak saling bergantung -- paralel,
+    // sama seperti checkIn()/identify() di atas.
+    const [nonSchoolDay, student] = await Promise.all([
+      isNonSchoolDay(date),
+      prisma.student.findFirst({
+        where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+        include: { class: true },
+      }),
+    ]);
 
     // Sabtu/Minggu ATAU hari libur: sistem absensi (termasuk absen pulang)
     // tidak aktif -- konsisten dengan guard yang sama di checkIn()/identify().
-    if (await isNonSchoolDay(getTodayDateOnly())) {
+    if (nonSchoolDay) {
       return { type: "SCHOOL_CLOSED" };
     }
-
-    const student = await prisma.student.findFirst({
-      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
-      include: { class: true },
-    });
 
     if (!student) return { type: "STUDENT_NOT_FOUND" };
     if (student.status !== StudentStatus.ACTIVE) {
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
-    const date = getTodayDateOnly();
     const existing = await prisma.attendance.findUnique({
       where: { studentId_date: { studentId: student.id, date } },
     });
@@ -699,22 +762,25 @@ export class AttendanceService {
   }): Promise<IdentifyPulangResult> {
     const { method } = params;
     const identifier = normalizeIdentifier(params.identifier, method);
+    const date = getTodayDateOnly();
 
-    if (await isNonSchoolDay(getTodayDateOnly())) {
+    const [nonSchoolDay, student] = await Promise.all([
+      isNonSchoolDay(date),
+      prisma.student.findFirst({
+        where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+        include: { class: true },
+      }),
+    ]);
+
+    if (nonSchoolDay) {
       return { type: "SCHOOL_CLOSED" };
     }
-
-    const student = await prisma.student.findFirst({
-      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
-      include: { class: true },
-    });
 
     if (!student) return { type: "STUDENT_NOT_FOUND" };
     if (student.status !== StudentStatus.ACTIVE) {
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
-    const date = getTodayDateOnly();
     const existing = await prisma.attendance.findUnique({
       where: { studentId_date: { studentId: student.id, date } },
     });

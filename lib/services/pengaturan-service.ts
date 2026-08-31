@@ -1,5 +1,6 @@
 // lib/services/pengaturan-service.ts
 import "server-only";
+import { revalidateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import type { SessionUser } from "@/lib/auth/session";
 import type { createClient } from "@/lib/supabase/server";
@@ -11,6 +12,7 @@ import type {
   CreateWhatsAppSenderInput,
 } from "@/lib/validations/pengaturan";
 import * as fonnteClient from "@/lib/services/fonnte-client";
+import { SCHEDULE_CACHE_TAG } from "@/lib/services/attendance-service";
 
 export class PengaturanServiceError extends Error {}
 
@@ -143,6 +145,12 @@ export async function upsertAttendanceSchedule(
     },
   });
 
+  // Attendance-service.ts (resolveStatus) mencache jadwal per dayOfWeek
+  // selama 60 detik supaya scan tidak query AttendanceSchedule/SchoolSetting
+  // berulang -- basi-kan cache itu SEKARANG supaya perubahan admin langsung
+  // dipakai scan berikutnya, bukan menunggu sampai 60 detik habis sendiri.
+  revalidateTag(SCHEDULE_CACHE_TAG);
+
   return schedule;
 }
 
@@ -185,6 +193,10 @@ export async function updateDefaultSchedule(
       description: `Mengatur jadwal absensi default: mulai ${data.defaultCheckInTime}, batas terlambat ${data.lateAfter}`,
     },
   });
+
+  // Sama seperti upsertAttendanceSchedule() -- basi-kan cache jadwal supaya
+  // perubahan default schedule langsung berlaku, bukan menunggu 60 detik.
+  revalidateTag(SCHEDULE_CACHE_TAG);
 
   return setting;
 }
