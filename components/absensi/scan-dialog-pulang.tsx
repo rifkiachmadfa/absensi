@@ -21,8 +21,12 @@ import { ScanLiveCard } from "@/components/absensi/scan-live-card";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
+import { identifiedMeta } from "@/lib/attendance/classify-result";
 import { cn } from "@/lib/utils";
-import type { AttendanceCheckOutResponse } from "@/lib/types/attendance";
+import type {
+  AttendanceCheckOutResponse,
+  AttendanceIdentifyPulangResponse,
+} from "@/lib/types/attendance";
 
 // Sama persis pola & tampilannya dengan scan-dialog.tsx (masuk) -- lihat
 // catatan lengkap di sana (kamera tetap hidup, hasil diproses di background,
@@ -124,11 +128,29 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
     },
   });
 
+  // DUA fase per scan, sama persis polanya dengan scan-dialog.tsx (masuk):
+  // fase 1 memanggil /api/absensi/scan-pulang/identify (read-only, cepat)
+  // supaya Nama/Kelas tampil segera, fase 2 memanggil /api/absensi/scan-pulang
+  // (checkOut(), yang benar-benar menyimpan checkOutAt) seperti biasa dan
+  // TETAP satu-satunya penentu hasil akhir.
   const handleDetected = useCallback(
     (qrToken: string) => {
       if (isInFlight(qrToken)) return;
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
-      enqueue(qrToken, "Memindai kartu...", async () => {
+      enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
+        try {
+          const identifyRes = await fetch("/api/absensi/scan-pulang/identify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ qrToken }),
+          });
+          const identified = (await identifyRes.json()) as AttendanceIdentifyPulangResponse;
+          const meta = identifiedMeta(identified);
+          if (meta) markIdentified(meta);
+        } catch {
+          // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
+        }
+
         try {
           const res = await fetch("/api/absensi/scan-pulang", {
             method: "POST",
@@ -163,11 +185,14 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
     setStudents(data.students ?? []);
   }, []);
 
+  // Sama seperti scan-dialog.tsx: Nama/Kelas sudah diketahui dari hasil
+  // pencarian, jadi markIdentified() segera tanpa fase identify terpisah.
   const absenkanManual = useCallback(
     (student: Student) => {
       if (isInFlight(student.id)) return;
       playScanBeep();
-      enqueue(student.id, student.name, async () => {
+      enqueue(student.id, student.name, async (markIdentified) => {
+        markIdentified({ label: student.name, meta: { className: student.className } });
         try {
           const res = await fetch("/api/absensi/manual-pulang", {
             method: "POST",
