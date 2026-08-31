@@ -68,25 +68,37 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   // Riwayat/ScanLiveCard selagi guru lanjut mengarahkan kamera ke kartu
   // berikutnya; fase 2 memanggil /api/absensi/scan (checkIn(), yang
   // benar-benar menyimpan) seperti biasa dan TETAP satu-satunya penentu
-  // hasil akhir. Kalau fase 1 gagal/timeout, fase 2 tetap jalan seperti
-  // biasa -- guru cuma tidak melihat nama lebih awal untuk scan itu.
+  // hasil akhir.
+  //
+  // Kedua fase di-*fire* BERSAMAAN (bukan await berurutan) -- fase 1 hanya
+  // dipakai untuk menampilkan Nama/Kelas lebih awal via markIdentified(),
+  // TIDAK PERNAH untuk menunda mulainya fase 2. Kalau fase 1 gagal/lambat,
+  // fase 2 tetap berjalan penuh kecepatannya sendiri; guru cuma tidak
+  // melihat nama lebih awal untuk scan itu. Ini memangkas waktu tunggu guru
+  // dari (durasi fase 1 + durasi fase 2) menjadi kira-kira durasi fase 2
+  // saja (fase 2 -- checkIn() -- selalu lebih berat/lama dari fase 1 karena
+  // fase 1 read-only, jadi fase 1 nyaris selalu selesai lebih dulu dan tetap
+  // sempat menampilkan nama sebelum hasil akhir muncul).
   const handleDetected = useCallback(
     (qrToken: string) => {
       if (isInFlight(qrToken)) return; // request utk kartu ini masih berjalan
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
       enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
-        try {
-          const identifyRes = await fetch("/api/absensi/scan/identify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ qrToken }),
+        // Sengaja TIDAK di-await di sini -- fase 1 berjalan di background,
+        // paralel dengan fase 2 di bawah, bukan sebelum fase 2 dimulai.
+        fetch("/api/absensi/scan/identify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ qrToken }),
+        })
+          .then((res) => res.json())
+          .then((identified: AttendanceIdentifyResponse) => {
+            const meta = identifiedMeta(identified);
+            if (meta) markIdentified(meta);
+          })
+          .catch(() => {
+            // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
           });
-          const identified = (await identifyRes.json()) as AttendanceIdentifyResponse;
-          const meta = identifiedMeta(identified);
-          if (meta) markIdentified(meta);
-        } catch {
-          // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
-        }
 
         try {
           const res = await fetch("/api/absensi/scan", {

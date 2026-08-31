@@ -133,23 +133,30 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
   // supaya Nama/Kelas tampil segera, fase 2 memanggil /api/absensi/scan-pulang
   // (checkOut(), yang benar-benar menyimpan checkOutAt) seperti biasa dan
   // TETAP satu-satunya penentu hasil akhir.
+  //
+  // Kedua fase di-*fire* BERSAMAAN (bukan await berurutan) -- lihat catatan
+  // lengkap di scan-dialog.tsx (masuk). Fase 1 TIDAK PERNAH menunda mulainya
+  // fase 2; ia hanya "menyusul" mengisi Nama/Kelas lewat markIdentified()
+  // begitu responsnya datang.
   const handleDetected = useCallback(
     (qrToken: string) => {
       if (isInFlight(qrToken)) return;
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
       enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
-        try {
-          const identifyRes = await fetch("/api/absensi/scan-pulang/identify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ qrToken }),
+        // Sengaja TIDAK di-await -- berjalan paralel dengan fase 2 di bawah.
+        fetch("/api/absensi/scan-pulang/identify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ qrToken }),
+        })
+          .then((res) => res.json())
+          .then((identified: AttendanceIdentifyPulangResponse) => {
+            const meta = identifiedMeta(identified);
+            if (meta) markIdentified(meta);
+          })
+          .catch(() => {
+            // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
           });
-          const identified = (await identifyRes.json()) as AttendanceIdentifyPulangResponse;
-          const meta = identifiedMeta(identified);
-          if (meta) markIdentified(meta);
-        } catch {
-          // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
-        }
 
         try {
           const res = await fetch("/api/absensi/scan-pulang", {

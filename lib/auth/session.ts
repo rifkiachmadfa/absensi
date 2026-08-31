@@ -1,7 +1,9 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { AUTH_USER_ID_HEADER } from "@/lib/supabase/middleware";
 import { prisma } from "../prisma";
 import type { User as AppUser } from "@/app/generated/prisma/client";
 
@@ -11,20 +13,51 @@ export type SessionUser = Pick<
 >;
 
 /**
- * Ambil user yang sedang login (Supabase Auth) + data role dari Prisma.
- * di-cache per-request agar tidak query berulang kali dalam satu render.
+ * Ambil user yang sedang login + data role dari Prisma.
+ * Di-cache per-request agar tidak query berulang kali dalam satu render.
+ *
+ * PENTING soal auth.getUser() (network call ke Supabase Auth, BUKAN baca
+ * cookie lokal -- itu memang desain library-nya demi keamanan):
+ * middleware.ts SUDAH memanggilnya sekali untuk setiap request yang lewat
+ * matcher-nya (lihat lib/supabase/middleware.ts) dan menitipkan hasilnya
+ * lewat header AUTH_USER_ID_HEADER. Karena request itu mustahil sampai ke
+ * sini tanpa lolos middleware lebih dulu, memanggil auth.getUser() LAGI di
+ * sini untuk request yang sama hanya menduplikasi round trip jaringan yang
+ * sudah dilakukan middleware, tanpa validasi tambahan apa pun.
+ *
+ * Header ini tidak bisa dipalsukan client: middleware SELALU
+ * meng-overwrite-nya (requestHeaders.set(...), bukan menambahkan) sebelum
+ * meneruskan request, jadi apa pun yang client kirim sendiri di header ini
+ * tidak pernah sampai ke sini.
+ *
+ * Fallback ke auth.getUser() tetap disediakan untuk pemanggilan di luar
+ * request yang lewat middleware (mis. script/cron/test) -- di situ header
+ * ini tidak ada sama sekali.
  */
 export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
-  const supabase = await createClient();
+  const headerList = await headers();
+  const headerUserId = headerList.get(AUTH_USER_ID_HEADER);
 
-  const {
-    data: { user: authUser },
-  } = await supabase.auth.getUser();
+  let authUserId: string | null;
 
-  if (!authUser) return null;
+  if (headerUserId !== null) {
+    // Request ini sudah lewat middleware -- percaya hasil validasinya,
+    // string kosong berarti middleware sudah memastikan belum login.
+    authUserId = headerUserId || null;
+  } else {
+    // Tidak lewat middleware (mis. dipanggil dari script/cron) -- baru di
+    // sini fallback ke network call langsung ke Supabase Auth.
+    const supabase = await createClient();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    authUserId = authUser?.id ?? null;
+  }
+
+  if (!authUserId) return null;
 
   const appUser = await prisma.user.findUnique({
-    where: { id: authUser.id },
+    where: { id: authUserId },
     select: {
       id: true,
       email: true,
