@@ -30,8 +30,19 @@ export type ScanQueueItem<TResult> = {
   // ditampilkan di UI (lihat ScanLiveCard) tanpa perlu mengubah bentuk
   // dasar ScanQueueItem tiap kali ada field baru yang mau ditonjolkan.
   meta?: Record<string, string>;
+  // true begitu server sudah BERHASIL mengenali siswa (Nama/Kelas valid di
+  // `label`/`meta`) lewat markIdentified() -- lepas dari apakah proses
+  // simpannya (status masih "pending") sudah selesai atau belum. UI (lihat
+  // ScanLiveCard) memakai flag ini, BUKAN `status`, untuk memutuskan kapan
+  // boleh menampilkan Nama/Kelas asli alih-alih placeholder "-".
+  identified?: boolean;
   result?: TResult;
 };
+
+// Dilaporkan oleh `submit()` (lewat parameter `markIdentified`) SEGERA
+// setelah siswa berhasil dikenali di server -- lihat catatan lengkap di
+// enqueue() di bawah.
+type IdentifiedUpdate = { label: string; meta?: Record<string, string> };
 
 type UseScanQueueOptions<TResult> = {
   // Mengubah response FINAL dari server menjadi label + warna badge.
@@ -64,7 +75,18 @@ export function useScanQueue<TResult>({
   const isInFlight = useCallback((key: string) => inFlightRef.current.has(key), []);
 
   const enqueue = useCallback(
-    (key: string, pendingLabel: string, submit: () => Promise<TResult>) => {
+    (
+      key: string,
+      pendingLabel: string,
+      // `submit` menerima `markIdentified` -- panggil callback ini SEGERA
+      // setelah fase identifikasi cepat (mis. /api/absensi/scan/identify)
+      // mengembalikan nama siswa, SEBELUM `submit` selesai (masih boleh
+      // lanjut memproses fase penyimpanan sesungguhnya). Ini yang membuat
+      // Nama/Kelas tampil duluan di UI selagi absensi masih diproses di
+      // background -- BUKAN mendahului hasil akhir server, cuma
+      // menampilkan progres nyata begitu server benar-benar melaporkannya.
+      submit: (markIdentified: (update: IdentifiedUpdate) => void) => Promise<TResult>
+    ) => {
       inFlightRef.current.add(key);
       const id = `scan-${Date.now()}-${seqRef.current++}`;
 
@@ -75,11 +97,23 @@ export function useScanQueue<TResult>({
         )
       );
 
-      submit()
+      const markIdentified = (update: IdentifiedUpdate) => {
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? { ...item, label: update.label, meta: update.meta, identified: true }
+              : item
+          )
+        );
+      };
+
+      submit(markIdentified)
         .then((result) => {
           const { status, label, detail, meta } = classify(result);
           setQueue((prev) =>
-            prev.map((item) => (item.id === id ? { ...item, status, label, detail, meta, result } : item))
+            prev.map((item) =>
+              item.id === id ? { ...item, status, label, detail, meta, result, identified: true } : item
+            )
           );
           onResult(result);
         })

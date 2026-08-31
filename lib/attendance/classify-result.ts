@@ -17,6 +17,8 @@ import type { ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import type {
   AttendanceCheckInResponse,
   AttendanceCheckOutResponse,
+  AttendanceIdentifyResponse,
+  AttendanceIdentifyPulangResponse,
 } from "@/lib/types/attendance";
 
 export function jamJakarta(iso: string) {
@@ -34,6 +36,24 @@ type ClassifiedResult = {
   detail?: string;
   meta?: Record<string, string>;
 };
+
+// Menerjemahkan hasil fase 1 (identify/identifyPulang, read-only -- lihat
+// /api/absensi/scan/identify & /api/absensi/scan-pulang/identify) menjadi
+// { label, meta } yang siap dipakai use-scan-queue.ts untuk menampilkan
+// Nama/Kelas SEGERA, SEBELUM fase 2 (checkIn()/checkOut(), yang benar-benar
+// menyimpan) selesai. `null` berarti siswa belum bisa diidentifikasi sama
+// sekali (STUDENT_NOT_FOUND/SCHOOL_CLOSED, atau request identify gagal) --
+// dalam kasus ini UI TETAP menunggu hasil fase 2 seperti biasa, karena
+// hanya fase 2 yang menentukan hasil akhir (Section 3.1, 3.2, 26).
+// STUDENT_INACTIVE sengaja TIDAK menyertakan className (siswa nonaktif
+// tidak selalu masih tergabung ke kelasnya di response ini).
+export function identifiedMeta(
+  result: AttendanceIdentifyResponse | AttendanceIdentifyPulangResponse
+): { label: string; meta?: Record<string, string> } | null {
+  if (!("student" in result)) return null;
+  const meta = "className" in result.student ? { className: result.student.className } : undefined;
+  return { label: result.student.name, meta };
+}
 
 // ---------- Absensi Masuk (check-in) ----------
 

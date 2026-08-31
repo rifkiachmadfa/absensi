@@ -12,11 +12,14 @@ import { playScanBeep } from "@/lib/audio/beep";
 import {
   classifyCheckInResult,
   classifyCheckOutResult,
+  identifiedMeta,
 } from "@/lib/attendance/classify-result";
 import type { ScanQueueItem, ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import type {
   AttendanceCheckInResponse,
   AttendanceCheckOutResponse,
+  AttendanceIdentifyResponse,
+  AttendanceIdentifyPulangResponse,
 } from "@/lib/types/attendance";
 
 export type AbsensiStationMode = "masuk" | "pulang";
@@ -34,6 +37,13 @@ const MAX_ITEMS_PER_STATION = 12;
 
 function endpointFor(mode: AbsensiStationMode) {
   return mode === "masuk" ? "/api/absensi/scan" : "/api/absensi/scan-pulang";
+}
+
+// Fase 1 (read-only, cepat) dari pola identify-lalu-submit yang sama
+// dipakai ScanDialog/ScanDialogPulang -- lihat catatan lengkap di
+// scan-dialog.tsx & attendance-service.ts.
+function identifyEndpointFor(mode: AbsensiStationMode) {
+  return mode === "masuk" ? "/api/absensi/scan/identify" : "/api/absensi/scan-pulang/identify";
 }
 
 function classify(mode: AbsensiStationMode, result: AttendanceCheckInResponse | AttendanceCheckOutResponse) {
@@ -98,7 +108,9 @@ export function useScannerStations(mode: AbsensiStationMode) {
       return { ...prev, [scanner.id]: { info: scanner, items } };
     });
 
-    const applyResult = (status: ScanQueueStatus, label: string, detail?: string, meta?: Record<string, string>, result?: AttendanceCheckInResponse | AttendanceCheckOutResponse) => {
+    const applyPatch = (
+      patch: Partial<ScanQueueItem<AttendanceCheckInResponse | AttendanceCheckOutResponse>>
+    ) => {
       setStations((prev) => {
         const existing = prev[scanner.id];
         if (!existing) return prev;
@@ -106,30 +118,60 @@ export function useScannerStations(mode: AbsensiStationMode) {
           ...prev,
           [scanner.id]: {
             ...existing,
-            items: existing.items.map((item) =>
-              item.id === itemId ? { ...item, status, label, detail, meta, result } : item
-            ),
+            items: existing.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
           },
         };
       });
     };
 
-    fetch(endpointFor(currentMode), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qrToken: token }),
-    })
-      .then((res) => res.json())
-      .then((result: AttendanceCheckInResponse | AttendanceCheckOutResponse) => {
-        const c = classify(currentMode, result);
-        applyResult(c.status, c.label, c.detail, c.meta, result);
+    const applyResult = (
+      status: ScanQueueStatus,
+      label: string,
+      detail?: string,
+      meta?: Record<string, string>,
+      result?: AttendanceCheckInResponse | AttendanceCheckOutResponse
+    ) => applyPatch({ status, label, detail, meta, result, identified: true });
+
+    (async () => {
+      // Fase 1 (read-only, cepat): tampilkan Nama/Kelas SEGERA begitu
+      // dikenali server, sama seperti ScanDialog/ScanDialogPulang -- lihat
+      // catatan lengkap di scan-dialog.tsx & attendance-service.ts. Hasil
+      // fase ini BUKAN keputusan akhir; fase 2 di bawah tetap satu-satunya
+      // yang menentukan hasil (kalau fase ini gagal, fase 2 tetap jalan).
+      try {
+        const identifyRes = await fetch(identifyEndpointFor(currentMode), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ qrToken: token }),
+        });
+        const identified = (await identifyRes.json()) as
+          | AttendanceIdentifyResponse
+          | AttendanceIdentifyPulangResponse;
+        const meta = identifiedMeta(identified);
+        if (meta) applyPatch({ label: meta.label, meta: meta.meta, identified: true });
+      } catch {
+        // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
+      }
+
+      // Fase 2: proses & simpan absensi sesungguhnya (satu-satunya sumber
+      // kebenaran, Section 26).
+      fetch(endpointFor(currentMode), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qrToken: token }),
       })
-      .catch(() => {
-        applyResult("error", "Gagal terhubung ke server");
-      })
-      .finally(() => {
-        inFlightRef.current.delete(inFlightKey);
-      });
+        .then((res) => res.json())
+        .then((result: AttendanceCheckInResponse | AttendanceCheckOutResponse) => {
+          const c = classify(currentMode, result);
+          applyResult(c.status, c.label, c.detail, c.meta, result);
+        })
+        .catch(() => {
+          applyResult("error", "Gagal terhubung ke server");
+        })
+        .finally(() => {
+          inFlightRef.current.delete(inFlightKey);
+        });
+    })();
   }, []);
 
   useEffect(() => {

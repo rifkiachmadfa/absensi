@@ -4,23 +4,27 @@
 import { CheckCircle2, AlertTriangle, XCircle, ScanLine } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
-import { useProcessingStage } from "@/components/absensi/use-processing-stage";
 import type { ScanQueueItem, ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 
 // Kartu ini adalah pengganti tampilan kamera untuk mode "Scanner Fisik"
 // (Section 29 UI_RULES: guru tetap butuh feedback visual yang jelas walau
 // tidak ada preview kamera untuk dilihat). Menampilkan hasil scan TERBARU
-// dari antrian (queue[0]) dalam format Nama / Kelas / Proses:
+// dari antrian (queue[0]) dalam format Nama / Kelas / Proses, mengikuti DUA
+// fase NYATA di server (bukan animasi tebakan) -- lihat use-scan-queue.ts
+// (markIdentified) & attendance-service.ts (identify()/identifyPulang()):
 //
-// - Selagi status "pending" (server belum menjawab): Nama & Kelas masih
-//   "-" (identitas siswa memang baru diketahui SETELAH AttendanceService
-//   mengidentifikasi di server -- lihat Section 26), dan baris "Proses"
-//   berjalan berubah-ubah lewat useProcessingStage.
-// - Begitu hasil final datang: Nama/Kelas terisi (atau pesan error kalau
-//   kartu tidak dikenali), baris "Proses" berhenti di deskripsi hasil
-//   akhir, dan warna kartu mengikuti status (hijau/kuning/merah) --
-//   konsisten dengan Section 4 UI_RULES (warna sesuai makna, bukan
-//   dekorasi).
+// 1. Belum diidentifikasi (`item.identified` masih false): server belum
+//    sempat menjawab fase identifikasi cepat sama sekali -- Nama & Kelas
+//    masih "-", baris "Proses" menampilkan "Mengidentifikasi kartu...".
+// 2. Sudah diidentifikasi tapi status masih "pending": Nama/Kelas SUDAH
+//    terisi (fase identifikasi cepat sudah menjawab), sementara absensi
+//    sesungguhnya (checkIn()/checkOut()) masih diproses di background --
+//    baris "Proses" menampilkan "Menyimpan data absensi...".
+// 3. Hasil final datang (`status` bukan lagi "pending"): Nama/Kelas
+//    terisi final (atau pesan error kalau kartu tidak dikenali sama
+//    sekali), baris "Proses" berhenti di deskripsi hasil akhir, dan warna
+//    kartu mengikuti status (hijau/kuning/merah) -- konsisten dengan
+//    Section 4 UI_RULES (warna sesuai makna, bukan dekorasi).
 
 const STATUS_CARD_CLASS: Record<ScanQueueStatus, string> = {
   pending: "border-border bg-muted/30",
@@ -38,15 +42,19 @@ function StatusIcon({ status }: { status: ScanQueueStatus }) {
 
 function LiveCardBody<TResult>({ item }: { item: ScanQueueItem<TResult> }) {
   const isPending = item.status === "pending";
-  const stage = useProcessingStage(isPending);
+  const isIdentified = Boolean(item.identified);
 
-  // Selagi pending, `label` masih diisi placeholder generik ("Memindai
-  // kartu...") oleh handleDetected -- bukan nama siswa sungguhan, karena
-  // identifikasi baru terjadi di server. Jangan tampilkan placeholder itu
-  // seolah-olah nama siswa.
-  const nama = isPending ? "-" : item.label;
-  const kelas = isPending ? "-" : (item.meta?.className ?? "-");
-  const proses = isPending ? stage : (item.detail ?? "Selesai diproses");
+  // Nama/Kelas hanya ditampilkan begitu server BENAR-BENAR mengenali siswa
+  // (item.identified === true, lewat markIdentified() di use-scan-queue.ts)
+  // -- bukan menebak dari `label` placeholder "Memindai kartu..." yang
+  // dipasang handleDetected sebelum request dikirim.
+  const nama = isIdentified ? item.label : "-";
+  const kelas = isIdentified ? (item.meta?.className ?? "-") : "-";
+  const proses = !isPending
+    ? (item.detail ?? "Selesai diproses")
+    : isIdentified
+      ? "Menyimpan data absensi..."
+      : "Mengidentifikasi kartu...";
 
   return (
     <div
@@ -97,8 +105,5 @@ export function ScanLiveCard<TResult>({ item }: { item?: ScanQueueItem<TResult> 
     );
   }
 
-  // `key={item.id}` memastikan useProcessingStage di dalam LiveCardBody
-  // benar-benar restart dari tahap pertama setiap kali ada scan BARU,
-  // bukan melanjutkan index tahap dari scan sebelumnya.
   return <LiveCardBody key={item.id} item={item} />;
 }

@@ -72,6 +72,18 @@ export type IdentifyResult =
   | { type: "STUDENT_INACTIVE"; student: StudentSummary }
   | { type: "SCHOOL_CLOSED" };
 
+// Hasil dari AttendanceService.identifyPulang -- pasangan IdentifyResult
+// untuk alur PULANG. "SUCCESS" di sini berarti "siswa sudah check-in &
+// belum check-out, siap diproses checkOut()" -- BUKAN berarti checkOutAt
+// sudah tersimpan (itu baru terjadi di CheckOutResult.SUCCESS).
+export type IdentifyPulangResult =
+  | { type: "SUCCESS"; student: StudentSummary; checkInTime: string; status: AttendanceStatus }
+  | { type: "ALREADY_CHECKED_OUT"; student: StudentSummary; time: string; status: AttendanceStatus }
+  | { type: "NOT_CHECKED_IN"; student: StudentSummary }
+  | { type: "STUDENT_NOT_FOUND" }
+  | { type: "STUDENT_INACTIVE"; student: StudentSummary }
+  | { type: "SCHOOL_CLOSED" };
+
 export type SetManualStatusResult =
   | {
       type: "SUCCESS";
@@ -348,18 +360,24 @@ export class AttendanceService {
     return rows;
   }
   /**
-   * LEGACY -- tidak lagi dipanggil oleh route manapun sejak checkIn() ada
-   * (lihat checkIn() di bawah). Disimpan sebagai opsi kalau suatu saat
-   * dibutuhkan alur "identifikasi dulu, baru pilih status manual" lagi.
-   *
-   * Langkah 1: identifikasi siswa dari QR Scan atau input manual.
-   * TIDAK menyimpan record absensi apapun -- hanya mengenali siswa dan
-   * memberi tahu UI apakah siswa tsb sudah absen hari ini.
+   * Awalnya dibuat untuk alur "identifikasi dulu, baru pilih status manual"
+   * (Phase 7) yang lalu digantikan checkIn() -- lihat catatan lama di
+   * confirmAttendance(). Sekarang dipakai LAGI, tapi untuk tujuan berbeda:
+   * fase 1 dari pola "identify lalu checkIn" di endpoint
+   * /api/absensi/scan/identify (dipanggil use-scan-queue.ts SEBELUM
+   * /api/absensi/scan) supaya UI bisa menampilkan Nama/Kelas siswa SEGERA
+   * begitu kartu dikenali, tanpa menunggu checkIn() (yang menulis ke
+   * database) selesai (Section 29 UX Scanner). Method ini TIDAK MENULIS
+   * apa pun -- hanya mengenali siswa & mengecek apakah siswa tsb sudah
+   * absen hari ini. Hasilnya BUKAN keputusan akhir; checkIn() SELALU
+   * dipanggil sesudahnya dan tetap satu-satunya yang menentukan status
+   * final/menyimpan data (Section 26). Race condition antara identify() dan
+   * checkIn() (mis. siswa sempat di-scan guru lain di antara keduanya) aman
+   * -- checkIn() mengulang pengecekan yang sama dari awal.
    *
    * `suggestedStatus` dihitung dari AttendanceSchedule/SchoolSetting sebagai
-   * SARAN saja (mis. highlight tombol "Hadir" di UI). Keputusan status akhir
-   * TETAP di tangan guru/petugas lewat confirmAttendance, karena jam masuk
-   * sekolah bisa berbeda-beda setiap hari (Section 11).
+   * SARAN saja (mis. highlight tombol "Hadir" di UI kalau suatu saat alur
+   * manual dipakai lagi). Keputusan status akhir tetap 100% milik checkIn().
    */
   static async identify(params: {
     identifier: string; // qrToken (QR) atau studentId (MANUAL)
@@ -654,6 +672,72 @@ export class AttendanceService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Fase 1 (read-only, TIDAK menulis apa pun) dari pola "identify lalu
+   * checkOut" untuk absen PULANG -- pasangan identify() di atas, dipakai
+   * endpoint /api/absensi/scan-pulang/identify supaya UI bisa menampilkan
+   * Nama/Kelas siswa SEGERA begitu kartu dikenali, tanpa menunggu
+   * checkOut() (yang menulis checkOutAt) selesai (Section 29 UX Scanner).
+   *
+   * Sengaja method TERPISAH dari identify() (bukan reuse) karena
+   * pertanyaannya beda: identify() mengecek "apakah siswa ini sudah
+   * check-in HARI INI?", method ini mengecek "apakah siswa ini sudah
+   * check-in TAPI BELUM check-out HARI INI?" -- keduanya butuh baca record
+   * Attendance yang sama tapi menyimpulkan hal berbeda darinya.
+   *
+   * Hasilnya BUKAN keputusan akhir; checkOut() SELALU dipanggil sesudahnya
+   * dan tetap satu-satunya yang menyimpan checkOutAt (Section 26). Race
+   * condition antara identifyPulang() dan checkOut() aman -- checkOut()
+   * mengulang pengecekan yang sama dari awal (dan sudah menangani race
+   * lewat updateMany + AlreadyCheckedOutError, lihat checkOut() di atas).
+   */
+  static async identifyPulang(params: {
+    identifier: string; // qrToken (QR) atau studentId (MANUAL)
+    method: AttendanceMethod;
+  }): Promise<IdentifyPulangResult> {
+    const { method } = params;
+    const identifier = normalizeIdentifier(params.identifier, method);
+
+    if (await isNonSchoolDay(getTodayDateOnly())) {
+      return { type: "SCHOOL_CLOSED" };
+    }
+
+    const student = await prisma.student.findFirst({
+      where: method === AttendanceMethod.QR ? { qrToken: identifier } : { id: identifier },
+      include: { class: true },
+    });
+
+    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (student.status !== StudentStatus.ACTIVE) {
+      return { type: "STUDENT_INACTIVE", student: toSummary(student) };
+    }
+
+    const date = getTodayDateOnly();
+    const existing = await prisma.attendance.findUnique({
+      where: { studentId_date: { studentId: student.id, date } },
+    });
+
+    if (!existing) {
+      return { type: "NOT_CHECKED_IN", student: toSummary(student) };
+    }
+
+    if (existing.checkOutAt) {
+      return {
+        type: "ALREADY_CHECKED_OUT",
+        student: toSummary(student),
+        time: existing.checkOutAt.toISOString(),
+        status: existing.status,
+      };
+    }
+
+    return {
+      type: "SUCCESS",
+      student: toSummary(student),
+      checkInTime: existing.checkInAt.toISOString(),
+      status: existing.status,
+    };
   }
 
   /**
