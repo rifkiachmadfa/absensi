@@ -1,6 +1,6 @@
 // lib/services/pengaturan-service.ts
 import "server-only";
-import { revalidateTag } from "next/cache";
+import { updateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import type { SessionUser } from "@/lib/auth/session";
 import type { createClient } from "@/lib/supabase/server";
@@ -149,7 +149,11 @@ export async function upsertAttendanceSchedule(
   // selama 60 detik supaya scan tidak query AttendanceSchedule/SchoolSetting
   // berulang -- basi-kan cache itu SEKARANG supaya perubahan admin langsung
   // dipakai scan berikutnya, bukan menunggu sampai 60 detik habis sendiri.
-  revalidateTag(SCHEDULE_CACHE_TAG);
+  // updateTag() (bukan revalidateTag()) karena fungsi ini SELALU dipanggil
+  // dari dalam Server Action (app/(protected)/pengaturan/actions.ts) --
+  // updateTag() memberi invalidasi langsung ("read-your-own-writes") tanpa
+  // perlu profile/cacheLife seperti revalidateTag() di Next.js 16.
+  updateTag(SCHEDULE_CACHE_TAG);
 
   return schedule;
 }
@@ -196,7 +200,7 @@ export async function updateDefaultSchedule(
 
   // Sama seperti upsertAttendanceSchedule() -- basi-kan cache jadwal supaya
   // perubahan default schedule langsung berlaku, bukan menunggu 60 detik.
-  revalidateTag(SCHEDULE_CACHE_TAG);
+  updateTag(SCHEDULE_CACHE_TAG);
 
   return setting;
 }
