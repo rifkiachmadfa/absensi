@@ -215,6 +215,25 @@ async function resolveStatus(dayOfWeek: number, hhmm: string): Promise<Attendanc
   return hhmm <= lateAfter ? AttendanceStatus.HADIR : AttendanceStatus.TERLAMBAT;
 }
 
+// QR token SELALU digenerate uppercase (lihat generateQrToken() di
+// siswa-service.ts: `STD-${...toUpperCase()}`), dan Student.qrToken di-lookup
+// dengan exact match (case-sensitive di Postgres). Kamera (html5-qrcode)
+// membaca ulang bitmap QR persis apa adanya sehingga selalu uppercase, TAPI
+// scanner fisik (HID keyboard-emulation, mis. EPPOS EP5300BT) bisa mengirim
+// huruf lowercase -- baik karena setting "case conversion" di scanner itu
+// sendiri, maupun karena scanner meniru tombol Shift berdasarkan ASCII dan
+// state Caps Lock di komputer guru saat itu ikut membalik huruf yang
+// dikirim. Ini murni soal encoding teks yang masuk, BUKAN business rule,
+// jadi aman dinormalisasi di sini (satu tempat, dipakai identify/checkIn/
+// checkOut) tanpa melanggar prinsip "jangan ubah attendance business rules
+// saat extend input mechanism". `identifier` untuk method MANUAL (studentId/
+// cuid) TIDAK disentuh sama sekali karena cuid Prisma bersifat case-sensitive
+// secara desain.
+function normalizeIdentifier(identifier: string, method: AttendanceMethod): string {
+  const trimmed = identifier.trim();
+  return method === AttendanceMethod.QR ? trimmed.toUpperCase() : trimmed;
+}
+
 function toSummary(student: {
   id: string;
   name: string;
@@ -346,7 +365,8 @@ export class AttendanceService {
     identifier: string; // qrToken (QR) atau studentId (MANUAL)
     method: AttendanceMethod;
   }): Promise<IdentifyResult> {
-    const { identifier, method } = params;
+    const { method } = params;
+    const identifier = normalizeIdentifier(params.identifier, method);
 
     // Sabtu/Minggu ATAU hari libur yang diatur admin (lihat isNonSchoolDay).
     // Dicek PALING AWAL, sebelum query siswa apapun, supaya tidak ada
@@ -407,7 +427,8 @@ export class AttendanceService {
     method: AttendanceMethod;
     recordedById: string;
   }): Promise<CheckInResult> {
-    const { identifier, method, recordedById } = params;
+    const { method, recordedById } = params;
+    const identifier = normalizeIdentifier(params.identifier, method);
 
     // Sabtu/Minggu ATAU hari libur yang diatur admin (Section 11 & 30 --
     // siswa yang tidak sekolah bukan berarti ALPHA, dan hari libur bukan
@@ -534,7 +555,8 @@ export class AttendanceService {
     method: AttendanceMethod;
     recordedById: string;
   }): Promise<CheckOutResult> {
-    const { identifier, method, recordedById } = params;
+    const { method, recordedById } = params;
+    const identifier = normalizeIdentifier(params.identifier, method);
 
     // Sabtu/Minggu ATAU hari libur: sistem absensi (termasuk absen pulang)
     // tidak aktif -- konsisten dengan guard yang sama di checkIn()/identify().
