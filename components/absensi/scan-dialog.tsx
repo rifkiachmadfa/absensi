@@ -1,8 +1,7 @@
-// components/absensi/scan-dialog-pulang.tsx
+// components/absensi/scan-dialog.tsx
 "use client";
 
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
 import { Bluetooth, Camera, ScanBarcode, XCircle } from "lucide-react";
 import {
   Dialog,
@@ -18,133 +17,71 @@ import { Spinner } from "@/components/ui/spinner";
 import { QrScanner } from "@/components/absensi/qr-scanner";
 import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { ScanLiveCard } from "@/components/absensi/scan-live-card";
-import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
+import { useScanQueue } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
 import { playScanBeep } from "@/lib/audio/beep";
-import { identifiedMeta } from "@/lib/attendance/classify-result";
+import {
+  classifyCheckInResult,
+  identifiedMeta,
+  notifyCheckInResult,
+} from "@/lib/attendance/classify-result";
 import { cn } from "@/lib/utils";
-import type {
-  AttendanceCheckOutResponse,
-  AttendanceIdentifyPulangResponse,
-} from "@/lib/types/attendance";
+import type { AttendanceCheckInResponse, AttendanceIdentifyResponse } from "@/lib/types/attendance";
 
-// Sama persis pola & tampilannya dengan scan-dialog.tsx (masuk) -- lihat
-// catatan lengkap di sana (kamera tetap hidup, hasil diproses di background,
-// panel Riwayat + toast "menyusul", toggle mode Kamera/Scanner Fisik).
-// Endpoint & tipe respons saja yang berbeda; logic tetap satu pintu lewat
-// AttendanceService.checkOut() (Section 9).
-
+// Dua sumber input kartu (Section 8.1 & scanner-bridge lokal) tetap
+// berujung ke handleDetected yang SAMA -- toggle ini murni UI, memilih mana
+// yang perlu DILIHAT guru: preview kamera (mode "camera") atau kartu
+// live-processing yang tidak butuh kamera sama sekali (mode "bridge").
+// Scanner-bridge WebSocket (useScannerBridge) tetap didengarkan di kedua
+// mode selama dialog terbuka -- yang berubah hanya apakah kamera HP
+// dinyalakan atau tidak (mematikan preview kamera saat scanner fisik
+// dipakai supaya tidak menguras baterai/menyalakan kamera yang sudah tidak
+// diperlukan).
 type ScanMode = "camera" | "bridge";
 
 type Student = { id: string; name: string; nisn: string; className: string };
 
-function jamJakarta(iso: string) {
-  return new Intl.DateTimeFormat("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "Asia/Jakarta",
-  }).format(new Date(iso));
-}
-
-function notify(result: AttendanceCheckOutResponse) {
-  if (result.type === "SUCCESS") {
-    toast.success(`${result.student.name} berhasil absen pulang`, {
-      description: `${result.student.className} · ${jamJakarta(result.time)}`,
-    });
-    return;
-  }
-  if (result.type === "ALREADY_CHECKED_OUT") {
-    toast.warning(`${result.student.name} sudah absen pulang`, {
-      description: `Tercatat pada ${jamJakarta(result.time)}`,
-    });
-    return;
-  }
-  if (result.type === "NOT_CHECKED_IN") {
-    toast.error(`${result.student.name} belum absen masuk hari ini`);
-    return;
-  }
-  if (result.type === "STUDENT_INACTIVE") {
-    toast.error(`${result.student.name} berstatus nonaktif`);
-    return;
-  }
-  if (result.type === "SCHOOL_CLOSED") {
-    toast.error("Hari ini libur, absensi tidak aktif.");
-    return;
-  }
-  toast.error("QR Code tidak dikenali oleh sistem");
-}
-
-function classifyResult(result: AttendanceCheckOutResponse): {
-  status: ScanQueueStatus;
-  label: string;
-  detail?: string;
-  meta?: Record<string, string>;
-} {
-  if (result.type === "SUCCESS") {
-    return {
-      status: "success",
-      label: result.student.name,
-      detail: `Pulang · ${jamJakarta(result.time)}`,
-      meta: { className: result.student.className },
-    };
-  }
-  if (result.type === "ALREADY_CHECKED_OUT") {
-    return {
-      status: "warning",
-      label: result.student.name,
-      detail: `Sudah absen pulang · ${jamJakarta(result.time)}`,
-      meta: { className: result.student.className },
-    };
-  }
-  if (result.type === "NOT_CHECKED_IN") {
-    return {
-      status: "error",
-      label: result.student.name,
-      detail: "Belum absen masuk",
-      meta: { className: result.student.className },
-    };
-  }
-  if (result.type === "STUDENT_INACTIVE") {
-    return { status: "error", label: result.student.name, detail: "Siswa nonaktif" };
-  }
-  if (result.type === "SCHOOL_CLOSED") {
-    return { status: "error", label: "Hari ini libur" };
-  }
-  return { status: "error", label: "QR tidak dikenali", detail: "Kartu siswa tidak dikenali oleh sistem" };
-}
-
-export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
+export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
   const [scanMode, setScanMode] = useState<ScanMode>("camera");
 
-  const { queue, enqueue, isInFlight, reset } = useScanQueue<AttendanceCheckOutResponse>({
-    classify: classifyResult,
+  const { queue, enqueue, isInFlight, reset } = useScanQueue<AttendanceCheckInResponse>({
+    classify: classifyCheckInResult,
     onResult: (result) => {
-      notify(result);
+      notifyCheckInResult(result);
       if (result.type === "SUCCESS") onSuccess();
     },
   });
 
-  // DUA fase per scan, sama persis polanya dengan scan-dialog.tsx (masuk):
-  // fase 1 memanggil /api/absensi/scan-pulang/identify (read-only, cepat)
-  // supaya Nama/Kelas tampil segera, fase 2 memanggil /api/absensi/scan-pulang
-  // (checkOut(), yang benar-benar menyimpan checkOutAt) seperti biasa dan
-  // TETAP satu-satunya penentu hasil akhir.
+  // QR terbaca -> langsung dikirim ke server TANPA menunggu (await) respons
+  // sebelum kamera boleh membaca kartu berikutnya. Kamera (QrScanner) tetap
+  // hidup terus-menerus -- tidak lagi di-unmount selagi menunggu hasil.
+  // Identifikasi siswa + cek duplikat + penentuan status + penyimpanan
+  // tetap SATU transaksi di server (Section 3.1 & 3.2), hanya saja UI tidak
+  // lagi diam menunggu; hasilnya "menyusul" lewat toast + panel Riwayat.
+  //
+  // DUA fase per scan (bukan cuma satu, lihat use-scan-queue.ts &
+  // attendance-service.ts): fase 1 memanggil /api/absensi/scan/identify
+  // (read-only, cepat) supaya Nama/Kelas siswa langsung tampil di panel
+  // Riwayat/ScanLiveCard selagi guru lanjut mengarahkan kamera ke kartu
+  // berikutnya; fase 2 memanggil /api/absensi/scan (checkIn(), yang
+  // benar-benar menyimpan) seperti biasa dan TETAP satu-satunya penentu
+  // hasil akhir. Kalau fase 1 gagal/timeout, fase 2 tetap jalan seperti
+  // biasa -- guru cuma tidak melihat nama lebih awal untuk scan itu.
   const handleDetected = useCallback(
     (qrToken: string) => {
-      if (isInFlight(qrToken)) return;
+      if (isInFlight(qrToken)) return; // request utk kartu ini masih berjalan
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
       enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
         try {
-          const identifyRes = await fetch("/api/absensi/scan-pulang/identify", {
+          const identifyRes = await fetch("/api/absensi/scan/identify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ qrToken }),
           });
-          const identified = (await identifyRes.json()) as AttendanceIdentifyPulangResponse;
+          const identified = (await identifyRes.json()) as AttendanceIdentifyResponse;
           const meta = identifiedMeta(identified);
           if (meta) markIdentified(meta);
         } catch {
@@ -152,14 +89,14 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
         }
 
         try {
-          const res = await fetch("/api/absensi/scan-pulang", {
+          const res = await fetch("/api/absensi/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ qrToken }),
           });
-          return (await res.json()) as AttendanceCheckOutResponse;
+          return (await res.json()) as AttendanceCheckInResponse;
         } catch {
-          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckOutResponse;
+          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckInResponse;
         }
       });
     },
@@ -167,10 +104,12 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
   );
 
   // Sumber scan KEDUA (opsional): scanner meja fisik lewat scanner-bridge
-  // lokal (Phase 9/10), aktif hanya selagi dialog ini terbuka. Sama persis
-  // dengan scan-dialog.tsx (masuk) -- hasilnya diteruskan ke handleDetected
-  // yang sama dipakai kamera, berujung ke AttendanceService.checkOut() yang
-  // sama, tanpa logic atau endpoint terpisah untuk scanner meja.
+  // lokal (Phase 9/10), aktif hanya selagi dialog ini terbuka. Hasilnya
+  // diteruskan ke handleDetected yang SAMA PERSIS dipakai kamera -- tidak
+  // ada logic absensi terpisah, tidak ada endpoint terpisah. Kalau tidak
+  // ada scanner-bridge yang berjalan di PC ini (mayoritas guru hanya
+  // memakai kamera HP), hook ini gagal konek secara diam-diam tanpa
+  // mengganggu apa pun.
   const { status: bridgeStatus, scanners } = useScannerBridge({
     enabled: open,
     onScan: handleDetected,
@@ -185,8 +124,12 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
     setStudents(data.students ?? []);
   }, []);
 
-  // Sama seperti scan-dialog.tsx: Nama/Kelas sudah diketahui dari hasil
-  // pencarian, jadi markIdentified() segera tanpa fase identify terpisah.
+  // Sama seperti QR: dikirim di background, guru bisa langsung mencari /
+  // memilih siswa lain tanpa menunggu request sebelumnya selesai. Beda
+  // dengan QR, di sini Nama/Kelas SUDAH diketahui dari hasil pencarian
+  // (dipilih langsung oleh guru) -- tidak perlu fase identify terpisah,
+  // cukup markIdentified() segera supaya ScanLiveCard konsisten dengan
+  // panel Riwayat (yang memang sudah menampilkan nama sejak awal).
   const absenkanManual = useCallback(
     (student: Student) => {
       if (isInFlight(student.id)) return;
@@ -194,14 +137,14 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
       enqueue(student.id, student.name, async (markIdentified) => {
         markIdentified({ label: student.name, meta: { className: student.className } });
         try {
-          const res = await fetch("/api/absensi/manual-pulang", {
+          const res = await fetch("/api/absensi/manual", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ studentId: student.id }),
           });
-          return (await res.json()) as AttendanceCheckOutResponse;
+          return (await res.json()) as AttendanceCheckInResponse;
         } catch {
-          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckOutResponse;
+          return { type: "STUDENT_NOT_FOUND" } as AttendanceCheckInResponse;
         }
       });
     },
@@ -223,10 +166,10 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
         if (!next) resetDialogState();
       }}
     >
-      <DialogTrigger render={<Button size="lg" variant="outline" />}>Scan Pulang</DialogTrigger>
+      <DialogTrigger render={<Button size="lg" />}>Scan Absensi</DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Absensi Pulang</DialogTitle>
+          <DialogTitle>Absensi Siswa</DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="scan">
@@ -236,8 +179,10 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
           </TabsList>
 
           <TabsContent value="scan">
-            {/* Sama seperti scan-dialog.tsx (masuk): toggle murni tampilan,
-               kedua metode berujung ke handleDetected yang sama. */}
+            {/* Pilihan metode input kartu: Kamera HP (default, Section 8.1)
+               atau Scanner Fisik (scanner-bridge lokal). Murni pilihan
+               TAMPILAN -- kedua metode berujung ke handleDetected yang sama
+               persis, jadi tidak ada logic absensi ganda. */}
             <div className="mb-3 inline-flex w-full items-center gap-1 rounded-lg bg-muted p-1">
               <button
                 type="button"
@@ -269,11 +214,15 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
 
             {scanMode === "camera" ? (
               <>
+                {/* Kamera tetap dipertahankan hidup selama dialog terbuka --
+                   tidak lagi di-unmount menunggu hasil scan sebelumnya,
+                   supaya guru bisa langsung mengarahkan ke kartu berikutnya. */}
                 {open && <QrScanner onDetected={handleDetected} isProcessing={false} />}
 
-                {/* Sama seperti scan-dialog.tsx: hanya tampil kalau scanner
-                   meja benar-benar tersambung, disembunyikan total untuk guru
-                   yang cuma memakai kamera HP. */}
+                {/* Indikator hanya muncul kalau scanner meja BENAR-BENAR
+                   tersambung -- disembunyikan total untuk guru yang cuma
+                   memakai kamera HP, supaya tidak ada kesan "tidak terhubung"
+                   yang membingungkan padahal memang tidak dipakai. */}
                 {bridgeStatus === "connected" && scannerCount > 0 && (
                   <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
                     <Bluetooth className="size-3.5 text-[#22949E]" />
@@ -283,10 +232,16 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
               </>
             ) : (
               <div className="space-y-3">
-                {/* Kamera tidak di-render sama sekali di mode ini -- lihat
-                   catatan lengkap di scan-dialog.tsx. */}
+                {/* Kamera TIDAK di-render sama sekali di mode ini (bukan
+                   cuma disembunyikan lewat CSS) -- QrScanner di-unmount
+                   sehingga stream kamera HP benar-benar dimatikan karena
+                   sudah tidak diperlukan. */}
                 <ScanLiveCard item={queue[0]} />
 
+                {/* Karena tidak ada preview kamera untuk dilihat, status
+                   koneksi scanner-bridge ditampilkan penuh di sini (bukan
+                   hanya saat "connected" seperti di mode Kamera) supaya
+                   guru tahu kalau ternyata aplikasi bridge belum berjalan. */}
                 <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
                   {bridgeStatus === "connected" ? (
                     <>
@@ -325,7 +280,7 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
                     <p className="text-sm text-muted-foreground">{s.className}</p>
                   </div>
                   <Button size="sm" disabled={isInFlight(s.id)} onClick={() => absenkanManual(s)}>
-                    Pulangkan
+                    Absenkan
                   </Button>
                 </div>
               ))}
