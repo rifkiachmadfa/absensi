@@ -57,6 +57,14 @@ export const attendanceStatusValues = [
 // Langkah 1 (identifikasi, TIDAK menyimpan apa pun):
 export const scanAttendanceSchema = z.object({
   qrToken: z.string().min(1, "QR token tidak boleh kosong"),
+  // Opsional: dibuat SEKALI oleh client per percobaan scan (lihat
+  // use-scan-queue.ts) dan dikirim di request identify MAUPUN request final
+  // (scan/scan-pulang) untuk kartu yang sama, supaya kedua broadcast Log
+  // Live ("identified" & "result") bisa dicocokkan jadi satu baris di UI
+  // (lihat lib/attendance/realtime/attendance-live-broadcast.ts). Tidak
+  // memengaruhi logic absensi sama sekali -- kalau tidak dikirim, server
+  // hanya tidak mem-broadcast apa pun ke Log Live untuk scan tsb.
+  scanId: z.string().min(1).max(64).optional(),
 });
 
 export const manualAttendanceSchema = z.object({

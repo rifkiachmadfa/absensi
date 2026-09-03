@@ -1,62 +1,49 @@
-// app/api/absensi/scan-pulang/identify/route.ts
-import { NextRequest, NextResponse, after } from "next/server";
-import { getCurrentUser } from "@/lib/auth/session";
-import { AttendanceService } from "@/lib/services/attendance-service";
-import { scanAttendanceSchema } from "@/lib/validations/attendance";
-import { identifiedMeta } from "@/lib/attendance/classify-result";
-import { broadcastScanIdentified } from "@/lib/attendance/realtime/attendance-live-broadcast";
-import { isRateLimited } from "@/lib/rate-limit";
-import { AttendanceMethod } from "@/app/generated/prisma/client";
+// lib/types/attendance.ts
+//
+// Tipe response absensi yang dipakai komponen client (scan-dialog,
+// scanner-fisik, tabel /absensi, dll). Sumber kebenaran untuk bentuk hasil
+// AttendanceService tetap di lib/services/attendance-service.ts -- file ini
+// hanya mengekspor ulang (alias) dengan nama yang lebih deskriptif untuk
+// dipakai di frontend, supaya TIDAK ada duplikasi definisi tipe (Section 39
+// Development Rules: "Tidak membuat duplicate service/model"). Validasi
+// input (zod schema) untuk endpoint absensi ada di lib/validations/attendance.ts
+// -- JANGAN duplikasi schema tersebut di sini.
+import type {
+  CheckInResult,
+  CheckOutResult,
+  IdentifyResult,
+  IdentifyPulangResult,
+} from "@/lib/services/attendance-service";
+import type { AttendanceStatus } from "@/app/generated/prisma/client";
 
-// Sama persis polanya dengan /api/absensi/scan/identify, hanya memanggil
-// AttendanceService.identifyPulang() (pasangan checkOut()) -- lihat catatan
-// lengkap di sana. Response endpoint ini BUKAN keputusan akhir; hanya
-// /api/absensi/scan-pulang yang menyimpan checkOutAt.
-export async function POST(req: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (!["GURU", "ADMIN", "SUPERADMIN", "WALI_KELAS"].includes(user.role)) {
-    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-  }
-  if (isRateLimited(`scan-pulang-identify:${user.id}`, 60)) {
-    return NextResponse.json({ message: "Terlalu banyak percobaan scan." }, { status: 429 });
-  }
+// Response dari POST /api/absensi/scan (checkIn()).
+export type AttendanceCheckInResponse = CheckInResult;
 
-  const body = await req.json().catch(() => null);
-  const parsed = scanAttendanceSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { type: "STUDENT_NOT_FOUND", message: "QR code tidak valid." },
-      { status: 400 }
-    );
-  }
+// Response dari POST /api/absensi/scan-pulang (checkOut()).
+export type AttendanceCheckOutResponse = CheckOutResult;
 
-  try {
-    const result = await AttendanceService.identifyPulang({
-      identifier: parsed.data.qrToken,
-      method: AttendanceMethod.QR,
-    });
+// Response dari POST /api/absensi/scan/identify (identify(), read-only).
+export type AttendanceIdentifyResponse = IdentifyResult;
 
-    // Sama persis polanya dengan /api/absensi/scan/identify -- lihat
-    // catatan lengkap di sana.
-    if (parsed.data.scanId) {
-      const meta = identifiedMeta(result);
-      if (meta) {
-        const scanId = parsed.data.scanId;
-        after(() =>
-          broadcastScanIdentified({
-            scanId,
-            mode: "pulang",
-            name: meta.label,
-            className: meta.meta?.className ?? "-",
-          })
-        );
-      }
-    }
+// Response dari POST /api/absensi/scan-pulang/identify (identifyPulang(),
+// read-only).
+export type AttendanceIdentifyPulangResponse = IdentifyPulangResult;
 
-    return NextResponse.json(result, { status: 200 });
-  } catch (err) {
-    console.error("Identify (scan-pulang) attendance error:", err);
-    return NextResponse.json({ message: "Terjadi kesalahan pada server." }, { status: 500 });
-  }
-}
+// Baris tabel GET /api/absensi/table -- lihat
+// AttendanceService.getAttendanceTable().
+export type AttendanceTableRow = {
+  studentId: string;
+  attendanceId: string | null;
+  name: string;
+  nisn: string;
+  className: string;
+  status: AttendanceStatus | "BELUM_ABSEN";
+  checkInAt: string | null;
+  checkOutAt: string | null;
+};
+
+// Opsi kelas untuk dropdown filter -- lihat GET /api/kelas.
+export type ClassOption = {
+  id: string;
+  name: string;
+};
