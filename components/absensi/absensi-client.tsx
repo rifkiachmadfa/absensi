@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { ScanBarcode } from "lucide-react";
+import { ScanBarcode, Radio } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -208,6 +208,10 @@ export function AbsensiClient({ canEditStatus }: { canEditStatus: boolean }) {
   <Button variant="outline" size="lg" render={<Link href="/absensi/scanner-fisik" />}>
     <ScanBarcode className="size-4" />
     Scanner Fisik
+  </Button>
+  <Button variant="outline" size="lg" render={<Link href="/absensi/log-live" />}>
+    <Radio className="size-4 text-[#22949E]" />
+    Log Live
   </Button>
   <ScanDialogPulang onSuccess={loadTable} />
   <ScanDialog onSuccess={loadTable} />
