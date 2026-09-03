@@ -1,8 +1,10 @@
 // app/api/absensi/scan-pulang/identify/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { scanAttendanceSchema } from "@/lib/validations/attendance";
+import { identifiedMeta } from "@/lib/attendance/classify-result";
+import { broadcastScanIdentified } from "@/lib/attendance/realtime/attendance-live-broadcast";
 import { isRateLimited } from "@/lib/rate-limit";
 import { AttendanceMethod } from "@/app/generated/prisma/client";
 
@@ -34,6 +36,24 @@ export async function POST(req: NextRequest) {
       identifier: parsed.data.qrToken,
       method: AttendanceMethod.QR,
     });
+
+    // Sama persis polanya dengan /api/absensi/scan/identify -- lihat
+    // catatan lengkap di sana.
+    if (parsed.data.scanId) {
+      const meta = identifiedMeta(result);
+      if (meta) {
+        const scanId = parsed.data.scanId;
+        after(() =>
+          broadcastScanIdentified({
+            scanId,
+            mode: "pulang",
+            name: meta.label,
+            className: meta.meta?.className ?? "-",
+          })
+        );
+      }
+    }
+
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
     console.error("Identify (scan-pulang) attendance error:", err);

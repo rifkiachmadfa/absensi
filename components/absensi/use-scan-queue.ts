@@ -85,7 +85,19 @@ export function useScanQueue<TResult>({
       // Nama/Kelas tampil duluan di UI selagi absensi masih diproses di
       // background -- BUKAN mendahului hasil akhir server, cuma
       // menampilkan progres nyata begitu server benar-benar melaporkannya.
-      submit: (markIdentified: (update: IdentifiedUpdate) => void) => Promise<TResult>
+      //
+      // `scanId` (argumen kedua) = id item antrian ini, dibuat SEKALI di
+      // sini per percobaan scan. Pemanggil (mis. handleDetected di
+      // scan-dialog.tsx) boleh menyertakannya di body request identify
+      // MAUPUN request final untuk kartu yang sama, supaya server bisa
+      // mem-broadcast event "identified"/"result" Log Live Absensi yang
+      // bisa dicocokkan jadi satu baris (lihat lib/realtime/attendance-live-broadcast.ts).
+      // Murni opsional -- pemanggil yang tidak butuh Log Live (mis.
+      // absenkanManual) boleh mengabaikan argumen ini sepenuhnya.
+      submit: (
+        markIdentified: (update: IdentifiedUpdate) => void,
+        scanId: string
+      ) => Promise<TResult>
     ) => {
       inFlightRef.current.add(key);
       const id = `scan-${Date.now()}-${seqRef.current++}`;
@@ -107,7 +119,7 @@ export function useScanQueue<TResult>({
         );
       };
 
-      submit(markIdentified)
+      submit(markIdentified, id)
         .then((result) => {
           const { status, label, detail, meta } = classify(result);
           setQueue((prev) =>

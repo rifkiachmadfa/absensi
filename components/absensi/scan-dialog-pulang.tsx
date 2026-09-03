@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { Bluetooth, Camera, ScanBarcode, XCircle } from "lucide-react";
+import { Bluetooth, Camera, ScanBarcode, XCircle, Radio } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { ScanLiveCard } from "@/components/absensi/scan-live-card";
 import { useScanQueue, type ScanQueueStatus } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
+import { LiveLogPanel } from "@/components/absensi/live-log/live-log-panel";
 import { playScanBeep } from "@/lib/audio/beep";
 import { identifiedMeta } from "@/lib/attendance/classify-result";
 import { cn } from "@/lib/utils";
@@ -142,12 +143,14 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
     (qrToken: string) => {
       if (isInFlight(qrToken)) return;
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
-      enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
-        // Sengaja TIDAK di-await -- berjalan paralel dengan fase 2 di bawah.
+      enqueue(qrToken, "Memindai kartu...", async (markIdentified, scanId) => {
+        // scanId disertakan di kedua request untuk keperluan Log Live --
+        // lihat catatan lengkap di scan-dialog.tsx (masuk). Sengaja TIDAK
+        // di-await -- berjalan paralel dengan fase 2 di bawah.
         fetch("/api/absensi/scan-pulang/identify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qrToken }),
+          body: JSON.stringify({ qrToken, scanId }),
         })
           .then((res) => res.json())
           .then((identified: AttendanceIdentifyPulangResponse) => {
@@ -162,7 +165,7 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
           const res = await fetch("/api/absensi/scan-pulang", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ qrToken }),
+            body: JSON.stringify({ qrToken, scanId }),
           });
           return (await res.json()) as AttendanceCheckOutResponse;
         } catch {
@@ -237,9 +240,13 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
         </DialogHeader>
 
         <Tabs defaultValue="scan">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="scan">Scan QR</TabsTrigger>
             <TabsTrigger value="manual">Manual</TabsTrigger>
+            <TabsTrigger value="live-log" className="gap-1.5">
+              <Radio className="size-3.5" />
+              Log Live
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="scan">
@@ -337,6 +344,10 @@ export function ScanDialogPulang({ onSuccess }: { onSuccess: () => void }) {
                 </div>
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="live-log">
+            <LiveLogPanel open={open} />
           </TabsContent>
         </Tabs>
 

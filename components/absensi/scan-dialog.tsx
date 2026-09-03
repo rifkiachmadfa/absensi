@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Bluetooth, Camera, ScanBarcode, XCircle } from "lucide-react";
+import { Bluetooth, Camera, ScanBarcode, XCircle, Radio } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
 import { ScanLiveCard } from "@/components/absensi/scan-live-card";
 import { useScanQueue } from "@/components/absensi/use-scan-queue";
 import { useScannerBridge } from "@/components/absensi/use-scanner-bridge";
+import { LiveLogPanel } from "@/components/absensi/live-log/live-log-panel";
 import { playScanBeep } from "@/lib/audio/beep";
 import {
   classifyCheckInResult,
@@ -83,13 +84,17 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
     (qrToken: string) => {
       if (isInFlight(qrToken)) return; // request utk kartu ini masih berjalan
       playScanBeep(); // konfirmasi suara: kartu terbaca & MULAI diproses
-      enqueue(qrToken, "Memindai kartu...", async (markIdentified) => {
-        // Sengaja TIDAK di-await di sini -- fase 1 berjalan di background,
-        // paralel dengan fase 2 di bawah, bukan sebelum fase 2 dimulai.
+      enqueue(qrToken, "Memindai kartu...", async (markIdentified, scanId) => {
+        // scanId disertakan di KEDUA request (identify & final) supaya
+        // server bisa mem-broadcast baris yang sama ke tab "Log Live" --
+        // lihat catatan lengkap di use-scan-queue.ts &
+        // lib/realtime/attendance-live-broadcast.ts. Sengaja TIDAK
+        // di-await di sini -- fase 1 berjalan di background, paralel
+        // dengan fase 2 di bawah, bukan sebelum fase 2 dimulai.
         fetch("/api/absensi/scan/identify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qrToken }),
+          body: JSON.stringify({ qrToken, scanId }),
         })
           .then((res) => res.json())
           .then((identified: AttendanceIdentifyResponse) => {
@@ -104,7 +109,7 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
           const res = await fetch("/api/absensi/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ qrToken }),
+            body: JSON.stringify({ qrToken, scanId }),
           });
           return (await res.json()) as AttendanceCheckInResponse;
         } catch {
@@ -185,9 +190,13 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
         </DialogHeader>
 
         <Tabs defaultValue="scan">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="scan">Scan QR</TabsTrigger>
             <TabsTrigger value="manual">Manual</TabsTrigger>
+            <TabsTrigger value="live-log" className="gap-1.5">
+              <Radio className="size-3.5" />
+              Log Live
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="scan">
@@ -297,6 +306,10 @@ export function ScanDialog({ onSuccess }: { onSuccess: () => void }) {
                 </div>
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="live-log">
+            <LiveLogPanel open={open} />
           </TabsContent>
         </Tabs>
 

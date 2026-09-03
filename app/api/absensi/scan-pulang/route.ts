@@ -1,9 +1,11 @@
 // app/api/absensi/scan-pulang/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { notifyPublicDashboardChanged } from "@/lib/cache/public-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { AttendanceService } from "@/lib/services/attendance-service";
 import { scanAttendanceSchema } from "@/lib/validations/attendance";
+import { classifyCheckOutResult } from "@/lib/attendance/classify-result";
+import { broadcastScanResult } from "@/lib/attendance/realtime/attendance-live-broadcast";
 import { isRateLimited } from "@/lib/rate-limit";
 import { AttendanceMethod } from "@/app/generated/prisma/client";
 
@@ -42,6 +44,27 @@ export async function POST(req: NextRequest) {
     // saat checkOutAt benar-benar tersimpan.
     if (result.type === "SUCCESS") {
       notifyPublicDashboardChanged();
+    }
+
+    // Sama persis polanya dengan /api/absensi/scan -- lihat catatan
+    // lengkap di sana.
+    if (parsed.data.scanId) {
+      const scanId = parsed.data.scanId;
+      const classified = classifyCheckOutResult(result);
+      after(() =>
+        broadcastScanResult({
+          scanId,
+          mode: "pulang",
+          name: "student" in result ? result.student.name : null,
+          className:
+            "student" in result && "className" in result.student
+              ? result.student.className
+              : null,
+          status: classified.status === "pending" ? "error" : classified.status,
+          label: classified.label,
+          detail: classified.detail,
+        })
+      );
     }
 
     return NextResponse.json(result, { status: statusCode });

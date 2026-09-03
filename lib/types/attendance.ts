@@ -1,90 +1,87 @@
-// lib/types/attendance.ts
+import { z } from "zod";
+import { AttendanceStatus } from "@/app/generated/prisma/client";
 
-// Hasil check-in (POST /api/absensi/scan atau /api/absensi/manual) -- kedua
-// endpoint langsung mengidentifikasi SEKALIGUS menyimpan absensi dalam satu
-// langkah, status (HADIR/TERLAMBAT) dihitung otomatis dari AttendanceSchedule
-// oleh AttendanceService.checkIn(). Guru/petugas tidak lagi memilih status
-// secara manual sesudah scan/pencarian (lihat catatan di attendance-service.ts).
-export type AttendanceCheckInResponse =
-  | {
-      type: "SUCCESS";
-      student: { name: string; nisn: string; className: string };
-      time: string;
-      status: string;
-    }
-  | {
-      type: "ALREADY_CHECKED_IN";
-      student: { name: string; className: string };
-      time: string;
-      status: string;
-    }
-  | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string }
-  | { type: "SCHOOL_CLOSED" };
+export const manualStatusValues = [
+  AttendanceStatus.HADIR,
+  AttendanceStatus.TERLAMBAT,
+  AttendanceStatus.SAKIT,
+  AttendanceStatus.IZIN,
+  AttendanceStatus.DISPENSASI,
+  AttendanceStatus.ALPHA,
+] as const;
 
-// Hasil check-out (POST /api/absensi/scan-pulang atau /api/absensi/manual-pulang)
-// -- mengisi checkOutAt pada record Attendance hari itu yang SUDAH ADA
-// (AttendanceService.checkOut()). Siswa yang belum check-in hari itu akan
-// mendapat NOT_CHECKED_IN, bukan record baru.
-export type AttendanceCheckOutResponse =
-  | {
-      type: "SUCCESS";
-      student: { name: string; nisn: string; className: string };
-      time: string;
-      status: string;
-    }
-  | {
-      type: "ALREADY_CHECKED_OUT";
-      student: { name: string; className: string };
-      time: string;
-      status: string;
-    }
-  | { type: "NOT_CHECKED_IN"; student: { name: string; className: string } }
-  | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string }
-  | { type: "SCHOOL_CLOSED" };
+export const setStatusSchema = z.object({
+  studentId: z.string().min(1),
+  date: z.string().date(), // "YYYY-MM-DD"
+  status: z.enum(manualStatusValues as unknown as [string, ...string[]]),
+});
 
-// Hasil identifikasi CEPAT (POST /api/absensi/scan/identify atau
-// /api/absensi/scan-pulang/identify) -- read-only, TIDAK menyimpan absensi
-// apa pun. Dipakai UI untuk menampilkan Nama/Kelas siswa SEGERA begitu
-// kartu dikenali, SEBELUM AttendanceCheckInResponse/AttendanceCheckOutResponse
-// (hasil final dari checkIn()/checkOut()) selesai diproses. Jangan pernah
-// memakai response ini sebagai keputusan akhir (Section 3.1, 3.2, 26) --
-// lihat identifiedMeta() di lib/attendance/classify-result.ts.
-export type AttendanceIdentifyResponse =
-  | { type: "SUCCESS"; student: { name: string; nisn: string; className: string } }
-  | {
-      type: "ALREADY_CHECKED_IN";
-      student: { name: string; className: string };
-      time: string;
-      status: string;
-    }
-  | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string }
-  | { type: "SCHOOL_CLOSED" };
+export const updateStatusSchema = z.object({
+  status: z.enum(manualStatusValues as unknown as [string, ...string[]]),
+});
 
-export type AttendanceIdentifyPulangResponse =
-  | { type: "SUCCESS"; student: { name: string; nisn: string; className: string } }
-  | {
-      type: "ALREADY_CHECKED_OUT";
-      student: { name: string; className: string };
-      time: string;
-      status: string;
-    }
-  | { type: "NOT_CHECKED_IN"; student: { name: string; className: string } }
-  | { type: "STUDENT_INACTIVE"; student: { name: string } }
-  | { type: "STUDENT_NOT_FOUND"; message?: string }
-  | { type: "SCHOOL_CLOSED" };
+// Perubahan status komunal (banyak siswa sekaligus) dari tabel /absensi.
+// Batas 500 sesuai estimasi beban maksimal siswa pada Section 38 spesifikasi.
+export const bulkSetStatusSchema = z.object({
+  studentIds: z.array(z.string().min(1)).min(1, "Pilih minimal satu siswa").max(500),
+  date: z.string().date(), // "YYYY-MM-DD"
+  status: z.enum(manualStatusValues as unknown as [string, ...string[]]),
+});
 
-export type AttendanceTableRow = {
-  studentId: string;
-  attendanceId: string | null;
-  name: string;
-  nisn: string;
-  className: string;
-  status: "HADIR" | "TERLAMBAT" | "SAKIT" | "IZIN" | "DISPENSASI" | "ALPHA" | "BELUM_ABSEN";
-  checkInAt: string | null;
-  checkOutAt: string | null;
-};
+export const dailyRecapQuerySchema = z.object({
+  date: z.string().date(),
+  classId: z.string().optional(),
+});
 
-export type ClassOption = { id: string; name: string };
+export const tableQuerySchema = z.object({
+  date: z.string().date(),
+  classId: z.string().optional(),
+  status: z.string().optional(),
+  // Targeted refresh: hanya ambil baris untuk studentId ini (dipakai UI
+  // /absensi setelah ubah status, supaya tidak perlu reload seluruh tabel).
+  studentIds: z.array(z.string().min(1)).optional(),
+});
+
+// Semua status yang boleh dipilih guru/petugas saat konfirmasi kehadiran
+// (Section 10). HADIR/TERLAMBAT termasuk karena sekarang dipilih manual,
+// bukan lagi ditentukan otomatis oleh sistem berdasarkan jam server.
+export const attendanceStatusValues = [
+  AttendanceStatus.HADIR,
+  AttendanceStatus.TERLAMBAT,
+  AttendanceStatus.SAKIT,
+  AttendanceStatus.IZIN,
+  AttendanceStatus.DISPENSASI,
+  AttendanceStatus.ALPHA,
+] as const;
+
+// Langkah 1 (identifikasi, TIDAK menyimpan apa pun):
+export const scanAttendanceSchema = z.object({
+  qrToken: z.string().min(1, "QR token tidak boleh kosong"),
+  // Opsional: dibuat SEKALI oleh client per percobaan scan (lihat
+  // use-scan-queue.ts) dan dikirim di request identify MAUPUN request final
+  // (scan/scan-pulang) untuk kartu yang sama, supaya kedua broadcast Log
+  // Live ("identified" & "result") bisa dicocokkan jadi satu baris di UI
+  // (lihat lib/realtime/attendance-live-broadcast.ts). Tidak memengaruhi
+  // logic absensi sama sekali -- kalau tidak dikirim, server hanya tidak
+  // mem-broadcast apa pun ke Log Live untuk scan tsb.
+  scanId: z.string().min(1).max(64).optional(),
+});
+
+export const manualAttendanceSchema = z.object({
+  studentId: z.string().min(1, "Student ID tidak boleh kosong"),
+});
+
+// Langkah 2 (konfirmasi kehadiran, status dipilih manual oleh petugas):
+export const confirmAttendanceSchema = z.object({
+  studentId: z.string().min(1, "Student ID tidak boleh kosong"),
+  status: z.enum(attendanceStatusValues as unknown as [string, ...string[]]),
+  method: z.enum(["QR", "MANUAL"]),
+});
+
+export const manualSearchSchema = z.object({
+  query: z.string().min(2, "Kata kunci minimal 2 karakter"),
+});
+
+export type ScanAttendanceInput = z.infer<typeof scanAttendanceSchema>;
+export type ManualAttendanceInput = z.infer<typeof manualAttendanceSchema>;
+export type ConfirmAttendanceInput = z.infer<typeof confirmAttendanceSchema>;
