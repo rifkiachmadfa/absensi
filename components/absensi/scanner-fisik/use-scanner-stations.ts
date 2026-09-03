@@ -139,10 +139,13 @@ export function useScannerStations(mode: AbsensiStationMode) {
       // fase ini BUKAN keputusan akhir; fase 2 di bawah tetap satu-satunya
       // yang menentukan hasil (kalau fase ini gagal, fase 2 tetap jalan).
       try {
+        // itemId dipakai juga sebagai scanId Log Live (dikirim di KEDUA
+        // fase untuk kartu yang sama) -- lihat catatan lengkap di
+        // scan-dialog.tsx & lib/realtime/attendance-live-broadcast.ts.
         const identifyRes = await fetch(identifyEndpointFor(currentMode), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qrToken: token }),
+          body: JSON.stringify({ qrToken: token, scanId: itemId }),
         });
         const identified = (await identifyRes.json()) as
           | AttendanceIdentifyResponse
@@ -158,7 +161,7 @@ export function useScannerStations(mode: AbsensiStationMode) {
       fetch(endpointFor(currentMode), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrToken: token }),
+        body: JSON.stringify({ qrToken: token, scanId: itemId }),
       })
         .then((res) => res.json())
         .then((result: AttendanceCheckInResponse | AttendanceCheckOutResponse) => {

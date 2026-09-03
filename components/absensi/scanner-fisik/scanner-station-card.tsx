@@ -1,219 +1,54 @@
-// components/absensi/scanner-fisik/use-scanner-stations.ts
+// components/absensi/scanner-fisik/scanner-station-card.tsx
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ScannerBridgeClient,
-  type ScannerBridgeScannerInfo,
-  type ScannerBridgeStatus,
-} from "@/lib/scanner-bridge/scanner-bridge-client";
-import { SCANNER_BRIDGE_DEDUPE_MS, SCANNER_BRIDGE_URL } from "@/lib/constants/scanner-bridge";
-import { playScanBeep } from "@/lib/audio/beep";
-import {
-  classifyCheckInResult,
-  classifyCheckOutResult,
-  identifiedMeta,
-} from "@/lib/attendance/classify-result";
-import type { ScanQueueItem, ScanQueueStatus } from "@/components/absensi/use-scan-queue";
-import type {
-  AttendanceCheckInResponse,
-  AttendanceCheckOutResponse,
-  AttendanceIdentifyResponse,
-  AttendanceIdentifyPulangResponse,
-} from "@/lib/types/attendance";
+import { Bluetooth } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ScanLiveCard } from "@/components/absensi/scan-live-card";
+import { ScanQueuePanel } from "@/components/absensi/scan-queue-panel";
+import type { ScannerStation } from "@/components/absensi/scanner-fisik/use-scanner-stations";
 
-export type AbsensiStationMode = "masuk" | "pulang";
+// Satu kartu = satu scanner meja fisik yang terdaftar di scanner-bridge
+// (Section 39: pakai ulang ScanLiveCard & ScanQueuePanel yang sudah ada di
+// dialog Scan Absensi -- tidak ada komponen tampilan duplikat, hanya
+// sumber datanya yang dipartisi per scanner lewat useScannerStations).
+// Beda dari ScannerFisikCard (legacy, dipakai components/absensi/
+// scanner-fisik-client.tsx yang lama): di sini props-nya satu object
+// `station` (bentuk dari useScannerStations), bukan scannerId/scannerName/
+// items terpisah.
+export function ScannerStationCard({ station }: { station: ScannerStation }) {
+  const { info, items } = station;
+  const successCount = items.filter((i) => i.status === "success").length;
 
-// Satu "station" = satu scanner meja fisik yang terdaftar di scanner-bridge.
-// Log-nya (`items`) TERPISAH per scanner -- inilah yang membedakan halaman
-// ini dari dialog Scan Absensi biasa, yang menggabungkan semua sumber scan
-// (kamera + SEMUA scanner meja) ke satu Riwayat.
-export type ScannerStation = {
-  info: ScannerBridgeScannerInfo;
-  items: ScanQueueItem<AttendanceCheckInResponse | AttendanceCheckOutResponse>[];
-};
+  return (
+    <Card className="p-4" data-scanner-id={info.id}>
+      <CardHeader className="px-0 pb-1">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Bluetooth className="size-4 text-[#22949E]" />
+            {info.name}
+          </CardTitle>
+          <Badge variant="outline" className="border-[#22949E]/30 bg-[#EAF7F8] text-[#22949E]">
+            Siap
+          </Badge>
+        </div>
+      </CardHeader>
 
-const MAX_ITEMS_PER_STATION = 12;
+      <div className="space-y-3">
+        <ScanLiveCard item={items[0]} />
 
-function endpointFor(mode: AbsensiStationMode) {
-  return mode === "masuk" ? "/api/absensi/scan" : "/api/absensi/scan-pulang";
-}
+        <p className="text-right text-xs text-muted-foreground">
+          {successCount} berhasil di scanner ini sesi ini
+        </p>
 
-// Fase 1 (read-only, cepat) dari pola identify-lalu-submit yang sama
-// dipakai ScanDialog/ScanDialogPulang -- lihat catatan lengkap di
-// scan-dialog.tsx & attendance-service.ts.
-function identifyEndpointFor(mode: AbsensiStationMode) {
-  return mode === "masuk" ? "/api/absensi/scan/identify" : "/api/absensi/scan-pulang/identify";
-}
-
-function classify(mode: AbsensiStationMode, result: AttendanceCheckInResponse | AttendanceCheckOutResponse) {
-  return mode === "masuk"
-    ? classifyCheckInResult(result as AttendanceCheckInResponse)
-    : classifyCheckOutResult(result as AttendanceCheckOutResponse);
-}
-
-// Menghubungkan halaman /absensi/scanner-fisik ke scanner-bridge lokal yang
-// SAMA dipakai ScanDialog/ScanDialogPulang (lib/scanner-bridge/scanner-
-// bridge-client.ts) -- tidak ada protokol atau koneksi terpisah. Bedanya
-// hanya di sini: hasil setiap scan disimpan ke log milik scanner ASALNYA
-// (berdasarkan `scannerId` yang dikirim bridge), bukan ke satu antrian
-// gabungan. Setiap scan tetap diproses lewat AttendanceService di server
-// (endpoint /api/absensi/scan atau /api/absensi/scan-pulang tergantung
-// `mode`) -- tidak ada logic absensi baru di sini, murni routing hasil ke
-// kartu station yang tepat (Section 26).
-export function useScannerStations(mode: AbsensiStationMode) {
-  const [bridgeStatus, setBridgeStatus] = useState<ScannerBridgeStatus>("connecting");
-  const [stations, setStations] = useState<Record<string, ScannerStation>>({});
-
-  // `mode` bisa berubah (tab Masuk/Pulang) tanpa perlu memutus & menyambung
-  // ulang koneksi WebSocket -- disimpan lewat ref supaya callback `onScan`
-  // milik client (dibuat sekali di effect connect) selalu memakai mode
-  // TERBARU tanpa effect ikut re-run tiap ganti tab.
-  const modeRef = useRef(mode);
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
-
-  // Dedupe token yang sama dari scanner yang sama dalam jeda singkat --
-  // pola identik dengan use-scanner-bridge.ts, tapi di-key per scanner
-  // supaya scanner lain tetap bisa memindai kartu yang (secara kebetulan)
-  // sama persis tanpa saling memblokir.
-  const lastScanRef = useRef<Map<string, { token: string; time: number }>>(new Map());
-
-  // Token yang requestnya masih berjalan, di-key `${scannerId}:${token}` --
-  // mencegah scan fisik yang sama terkirim dua kali sebelum response
-  // pertama kembali (independen dari dedupe waktu di atas).
-  const inFlightRef = useRef<Set<string>>(new Set());
-  const seqRef = useRef(0);
-
-  const submitScan = useCallback((scanner: ScannerBridgeScannerInfo, token: string) => {
-    const inFlightKey = `${scanner.id}:${token}`;
-    if (inFlightRef.current.has(inFlightKey)) return;
-    inFlightRef.current.add(inFlightKey);
-
-    playScanBeep();
-
-    const itemId = `station-scan-${Date.now()}-${seqRef.current++}`;
-    const currentMode = modeRef.current;
-
-    setStations((prev) => {
-      const existing = prev[scanner.id];
-      const pendingItem: ScanQueueItem<AttendanceCheckInResponse | AttendanceCheckOutResponse> = {
-        id: itemId,
-        createdAt: Date.now(),
-        status: "pending",
-        label: "Memindai kartu...",
-      };
-      const items = [pendingItem, ...(existing?.items ?? [])].slice(0, MAX_ITEMS_PER_STATION);
-      return { ...prev, [scanner.id]: { info: scanner, items } };
-    });
-
-    const applyPatch = (
-      patch: Partial<ScanQueueItem<AttendanceCheckInResponse | AttendanceCheckOutResponse>>
-    ) => {
-      setStations((prev) => {
-        const existing = prev[scanner.id];
-        if (!existing) return prev;
-        return {
-          ...prev,
-          [scanner.id]: {
-            ...existing,
-            items: existing.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
-          },
-        };
-      });
-    };
-
-    const applyResult = (
-      status: ScanQueueStatus,
-      label: string,
-      detail?: string,
-      meta?: Record<string, string>,
-      result?: AttendanceCheckInResponse | AttendanceCheckOutResponse
-    ) => applyPatch({ status, label, detail, meta, result, identified: true });
-
-    (async () => {
-      // Fase 1 (read-only, cepat): tampilkan Nama/Kelas SEGERA begitu
-      // dikenali server, sama seperti ScanDialog/ScanDialogPulang -- lihat
-      // catatan lengkap di scan-dialog.tsx & attendance-service.ts. Hasil
-      // fase ini BUKAN keputusan akhir; fase 2 di bawah tetap satu-satunya
-      // yang menentukan hasil (kalau fase ini gagal, fase 2 tetap jalan).
-      try {
-        // itemId dipakai juga sebagai scanId Log Live (dikirim di KEDUA
-        // fase untuk kartu yang sama) -- lihat catatan lengkap di
-        // scan-dialog.tsx & lib/realtime/attendance-live-broadcast.ts.
-        const identifyRes = await fetch(identifyEndpointFor(currentMode), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qrToken: token, scanId: itemId }),
-        });
-        const identified = (await identifyRes.json()) as
-          | AttendanceIdentifyResponse
-          | AttendanceIdentifyPulangResponse;
-        const meta = identifiedMeta(identified);
-        if (meta) applyPatch({ label: meta.label, meta: meta.meta, identified: true });
-      } catch {
-        // Diam -- fase 2 di bawah tetap jalan & menentukan hasil akhir.
-      }
-
-      // Fase 2: proses & simpan absensi sesungguhnya (satu-satunya sumber
-      // kebenaran, Section 26).
-      fetch(endpointFor(currentMode), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrToken: token, scanId: itemId }),
-      })
-        .then((res) => res.json())
-        .then((result: AttendanceCheckInResponse | AttendanceCheckOutResponse) => {
-          const c = classify(currentMode, result);
-          applyResult(c.status, c.label, c.detail, c.meta, result);
-        })
-        .catch(() => {
-          applyResult("error", "Gagal terhubung ke server");
-        })
-        .finally(() => {
-          inFlightRef.current.delete(inFlightKey);
-        });
-    })();
-  }, []);
-
-  useEffect(() => {
-    const client = new ScannerBridgeClient(SCANNER_BRIDGE_URL, {
-      onStatusChange: (next) => {
-        setBridgeStatus(next);
-      },
-      onScannersUpdate: (next) => {
-        // Daftarkan station untuk semua scanner yang dikenal bridge --
-        // begitu scanner terdeteksi, kartunya langsung tampil (status
-        // "Siap") walau belum ada satu scan pun.
-        setStations((prev) => {
-          const updated = { ...prev };
-          for (const s of next) {
-            if (!updated[s.id]) {
-              updated[s.id] = { info: s, items: [] };
-            } else {
-              updated[s.id] = { ...updated[s.id], info: s };
-            }
-          }
-          return updated;
-        });
-      },
-      onScan: (token, scanner) => {
-        const now = Date.now();
-        const last = lastScanRef.current.get(scanner.id);
-        if (last && last.token === token && now - last.time < SCANNER_BRIDGE_DEDUPE_MS) {
-          return;
-        }
-        lastScanRef.current.set(scanner.id, { token, time: now });
-        submitScan(scanner, token);
-      },
-    });
-
-    client.start();
-    return () => client.stop();
-  }, [submitScan]);
-
-  const stationList = Object.values(stations).sort((a, b) => a.info.name.localeCompare(b.info.name));
-
-  return { bridgeStatus, stations: stationList };
+        {items.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border py-4 text-center text-xs text-muted-foreground">
+            Belum ada scan dari scanner ini.
+          </p>
+        ) : (
+          <ScanQueuePanel items={items} />
+        )}
+      </div>
+    </Card>
+  );
 }
