@@ -216,4 +216,13 @@ enum AuditAction {
   ATTENDANCE_SCAN
   ATTENDANCE_MANUAL
   STATUS_CHANGE
+  // Percobaan absen (scan fisik/kamera ataupun manual) yang DITOLAK sistem:
+  // QR/token tidak dikenali, siswa nonaktif, hari libur, atau siswa belum
+  // check-in saat mencoba absen pulang. Tidak menghasilkan record Attendance.
+  ATTENDANCE_REJECTED
+  // Percobaan absen untuk siswa yang HARI INI sudah punya record (sudah
+  // check-in / sudah check-out) -- bukan error, tapi tetap harus tercatat
+  // supaya log aktivitas mencerminkan SEMUA aktivitas scanner fisik, bukan
+  // hanya yang berhasil membuat record baru.
+  ATTENDANCE_DUPLICATE
 }

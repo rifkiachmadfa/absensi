@@ -10,6 +10,8 @@ export const AUDIT_ACTIONS = [
   "ATTENDANCE_SCAN",
   "ATTENDANCE_MANUAL",
   "STATUS_CHANGE",
+  "ATTENDANCE_REJECTED",
+  "ATTENDANCE_DUPLICATE",
 ] as const;
 
 export const auditLogFilterSchema = z.object({

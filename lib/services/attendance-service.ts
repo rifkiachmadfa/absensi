@@ -36,6 +36,56 @@ function scheduleWhatsAppNotification(params: Parameters<typeof notifyAttendance
   });
 }
 
+// Mencatat SETIAP percobaan absen yang TIDAK menghasilkan record baru --
+// QR/token tidak dikenali, siswa nonaktif, hari libur, siswa belum
+// check-in saat absen pulang, maupun siswa yang sudah punya record hari
+// ini (Section 20: audit log harus mencerminkan aktivitas sesungguhnya,
+// termasuk dari scanner fisik meja yang tidak selalu berhasil pada
+// percobaan pertama). Dijadwalkan lewat after() -- SAMA seperti notifikasi
+// WhatsApp di atas -- supaya guru tetap mendapat feedback scan secepat
+// mungkin (Section 29 UX Scanner); penulisan log tidak pernah menahan
+// response ke client, dan kegagalannya (mis. DB sedang sibuk) tidak boleh
+// menggagalkan hasil scan yang sudah ditentukan.
+type RejectedAttendanceLog = {
+  userId: string;
+  action: AuditAction;
+  entity: string;
+  entityId?: string | null;
+  description: string;
+};
+
+function scheduleAttendanceAuditLog(params: RejectedAttendanceLog) {
+  after(async () => {
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: params.userId,
+          action: params.action,
+          entity: params.entity,
+          entityId: params.entityId ?? null,
+          description: params.description,
+        },
+      });
+    } catch (error) {
+      console.error("[AttendanceService] Gagal mencatat audit log percobaan absen:", error);
+    }
+  });
+}
+
+// Format jam saja (HH:mm:ss, Asia/Jakarta) untuk teks description audit log
+// -- deskripsi manusiawi, bukan ISO string mentah. Dipakai khusus di sini
+// (bukan getJakartaNow, yang menghitung dari "sekarang", bukan dari
+// timestamp Attendance yang sudah tersimpan sebelumnya).
+function formatJakartaTime(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 // ============================================================
 // Types
 // ============================================================
@@ -511,11 +561,34 @@ export class AttendanceService {
     // TIDAK ADA jalur (QR ataupun manual) yang bisa membuat record
     // Attendance di hari non-sekolah.
     if (nonSchoolDay) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Attendance",
+        entityId: null,
+        description: `Percobaan ${method === AttendanceMethod.QR ? "scan" : "absensi manual"} ditolak: hari ini bukan hari sekolah (token: ${identifier})`,
+      });
       return { type: "SCHOOL_CLOSED" };
     }
 
-    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (!student) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Attendance",
+        entityId: null,
+        description: `Percobaan ${method === AttendanceMethod.QR ? "scan" : "absensi manual"} ditolak: kartu/QR tidak dikenali sistem (token: ${identifier})`,
+      });
+      return { type: "STUDENT_NOT_FOUND" };
+    }
     if (student.status !== StudentStatus.ACTIVE) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Student",
+        entityId: student.id,
+        description: `Percobaan absen ditolak: ${student.name} (${student.class.name}) berstatus nonaktif`,
+      });
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
@@ -539,6 +612,13 @@ export class AttendanceService {
     ]);
 
     if (existing) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_DUPLICATE,
+        entity: "Attendance",
+        entityId: existing.id,
+        description: `${student.name} (${student.class.name}) sudah melakukan absensi hari ini pada ${formatJakartaTime(existing.checkInAt)} (${existing.status})`,
+      });
       return {
         type: "ALREADY_CHECKED_IN",
         student: toSummary(student),
@@ -602,6 +682,15 @@ export class AttendanceService {
         const existingRace = await prisma.attendance.findUnique({
           where: { studentId_date: { studentId: student.id, date } },
         });
+        if (existingRace) {
+          scheduleAttendanceAuditLog({
+            userId: recordedById,
+            action: AuditAction.ATTENDANCE_DUPLICATE,
+            entity: "Attendance",
+            entityId: existingRace.id,
+            description: `${student.name} (${student.class.name}) sudah melakukan absensi hari ini pada ${formatJakartaTime(existingRace.checkInAt)} (${existingRace.status}) -- terdeteksi saat scan hampir bersamaan`,
+          });
+        }
         return {
           type: "ALREADY_CHECKED_IN",
           student: toSummary(student),
@@ -649,11 +738,34 @@ export class AttendanceService {
     // Sabtu/Minggu ATAU hari libur: sistem absensi (termasuk absen pulang)
     // tidak aktif -- konsisten dengan guard yang sama di checkIn()/identify().
     if (nonSchoolDay) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Attendance",
+        entityId: null,
+        description: `Percobaan absen pulang (${method === AttendanceMethod.QR ? "scan" : "manual"}) ditolak: hari ini bukan hari sekolah (token: ${identifier})`,
+      });
       return { type: "SCHOOL_CLOSED" };
     }
 
-    if (!student) return { type: "STUDENT_NOT_FOUND" };
+    if (!student) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Attendance",
+        entityId: null,
+        description: `Percobaan absen pulang (${method === AttendanceMethod.QR ? "scan" : "manual"}) ditolak: kartu/QR tidak dikenali sistem (token: ${identifier})`,
+      });
+      return { type: "STUDENT_NOT_FOUND" };
+    }
     if (student.status !== StudentStatus.ACTIVE) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Student",
+        entityId: student.id,
+        description: `Percobaan absen pulang ditolak: ${student.name} (${student.class.name}) berstatus nonaktif`,
+      });
       return { type: "STUDENT_INACTIVE", student: toSummary(student) };
     }
 
@@ -664,10 +776,24 @@ export class AttendanceService {
     // Siswa belum check-in hari ini -> tidak ada apa pun untuk "dipulangkan".
     // checkOut() sengaja TIDAK membuat record baru (lihat catatan di atas).
     if (!existing) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_REJECTED,
+        entity: "Student",
+        entityId: student.id,
+        description: `Percobaan absen pulang ditolak: ${student.name} (${student.class.name}) belum melakukan absen masuk hari ini`,
+      });
       return { type: "NOT_CHECKED_IN", student: toSummary(student) };
     }
 
     if (existing.checkOutAt) {
+      scheduleAttendanceAuditLog({
+        userId: recordedById,
+        action: AuditAction.ATTENDANCE_DUPLICATE,
+        entity: "Attendance",
+        entityId: existing.id,
+        description: `${student.name} (${student.class.name}) sudah absen pulang hari ini pada ${formatJakartaTime(existing.checkOutAt)}`,
+      });
       return {
         type: "ALREADY_CHECKED_OUT",
         student: toSummary(student),
@@ -727,6 +853,15 @@ export class AttendanceService {
     } catch (err) {
       if (err instanceof AlreadyCheckedOutError) {
         const latest = await prisma.attendance.findUnique({ where: { id: existing.id } });
+        if (latest?.checkOutAt) {
+          scheduleAttendanceAuditLog({
+            userId: recordedById,
+            action: AuditAction.ATTENDANCE_DUPLICATE,
+            entity: "Attendance",
+            entityId: latest.id,
+            description: `${student.name} (${student.class.name}) sudah absen pulang hari ini pada ${formatJakartaTime(latest.checkOutAt)} -- terdeteksi saat scan hampir bersamaan`,
+          });
+        }
         return {
           type: "ALREADY_CHECKED_OUT",
           student: toSummary(student),
