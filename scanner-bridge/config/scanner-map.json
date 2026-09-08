@@ -4,6 +4,8 @@
     "port": 8765,
     "token": "isi-string-acak-di-sini"
   },
+  "defaultCompletionTimeoutMs": 250,
+  "defaultExpectedTokenLength": 16,
   "scanners": [
     {
       "id": "scanner-1",

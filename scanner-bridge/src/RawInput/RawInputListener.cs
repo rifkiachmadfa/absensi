@@ -52,14 +52,23 @@ public sealed class RawInputListener : IDisposable
     private readonly System.Threading.Timer _completionTimer;
 
     /// <summary>
-    /// Jeda diam (ms) yang dianggap "scan selesai". 80ms dipilih sebagai
-    /// titik awal yang aman (scanner biasanya mengirim seluruh payload
-    /// jauh di bawah itu, sementara keystroke manusia tercepat pun jarang
-    /// di bawah ~60-70ms antar tombol) -- TAPI ini nilai awal yang perlu
-    /// divalidasi lewat Test concurrency (Tahap R/S) dengan QR sungguhan
-    /// yang lebih panjang, bukan angka final yang sudah pasti benar.
+    /// PERBAIKAN (8 Sept 2026): jeda diam yang dianggap "scan selesai" TIDAK
+    /// lagi satu angka global tetap. 80ms cocok waktu semua unit dekat/
+    /// berkabel, tapi begitu salah satu EPPOS dipindah lebih jauh dari PC
+    /// (Bluetooth Classic HID), latensi transmisi antar-karakter unit itu
+    /// bisa melebihi 80ms DI TENGAH satu barcode -- akibatnya buffer
+    /// dianggap selesai sebelum barcode-nya habis terkirim, lalu sisa
+    /// karakter yang datang belakangan mulai buffer baru. Satu QR yang
+    /// valid pun terpecah jadi 2-3+ token pendek yang tidak dikenali
+    /// server. Timeout sekarang diresolusi PER DEVICE lewat
+    /// <see cref="CompletionTimeoutForScanner"/>: scanner yang tidak
+    /// mengisi "completionTimeoutMs" di scanner-map.json tetap memakai
+    /// default 80ms (atau "defaultCompletionTimeoutMs" kalau diisi), jadi
+    /// unit yang selama ini baik-baik saja tidak terpengaruh -- hanya unit
+    /// yang jauh yang perlu dinaikkan.
     /// </summary>
-    public int CompletionTimeoutMs { get; set; } = 80;
+    private int CompletionTimeoutForScanner(ScannerEntry identity)
+        => identity.CompletionTimeoutMs ?? _config.DefaultCompletionTimeoutMs;
 
     public event Action<ScanCompletedEventArgs>? ScanCompleted;
 
@@ -165,6 +174,71 @@ public sealed class RawInputListener : IDisposable
             deviceBuffer.Text.Append(ch.Value);
             deviceBuffer.LastKeystrokeUtc = DateTime.UtcNow;
         }
+
+        TryFlushOnExpectedLength(deviceBuffer, identity);
+    }
+
+    /// <summary>
+    /// PERBAIKAN (8 Sept 2026, lanjutan): idle-timeout (CheckCompletions)
+    /// sendirian tidak cukup untuk kasus dua siswa berbeda di-scan CEPAT
+    /// berurutan lewat scanner FISIK YANG SAMA (mis. jam padat) -- kalau
+    /// jeda antara karakter terakhir siswa A dan karakter pertama siswa B
+    /// lebih pendek dari completionTimeoutMs (yang untuk scanner jauh
+    /// sudah dinaikkan supaya tidak kepotong di tengah), karakter B akan
+    /// menyambung ke buffer sisa A alih-alih memulai buffer baru --
+    /// menghasilkan satu string gabungan yang tidak cocok siswa mana pun.
+    ///
+    /// Karena SEMUA qrToken sistem ini punya format tetap
+    /// `STD-XXXXXXXXXXXX` (lihat generateQrToken() di siswa-service.ts,
+    /// repo absensi) -- selalu PERSIS 16 karakter -- buffer di-flush
+    /// SEGERA begitu mencapai panjang itu, tanpa menunggu jeda diam sama
+    /// sekali. Ini menutup celah di atas: begitu token A genap 16 karakter,
+    /// buffer langsung dikosongkan, jadi karakter siswa B (walau datang
+    /// hanya beberapa milidetik kemudian) pasti mulai dari buffer kosong.
+    ///
+    /// Opt-in lewat "expectedTokenLength" di scanner-map.json (per scanner
+    /// atau default global) -- kosongkan/null kalau format token berubah
+    /// atau tidak seragam, dan sistem akan kembali murni mengandalkan
+    /// idle-timeout seperti sebelumnya.
+    /// </summary>
+    private void TryFlushOnExpectedLength(DeviceBuffer deviceBuffer, ScannerEntry identity)
+    {
+        var expectedLength = ExpectedTokenLengthForScanner(identity);
+        if (expectedLength is not int len || len <= 0) return;
+
+        string? completedText = null;
+        lock (deviceBuffer.SyncRoot)
+        {
+            if (deviceBuffer.Text.Length < len) return;
+            completedText = deviceBuffer.Text.ToString();
+            deviceBuffer.Text.Clear();
+        }
+
+        completedText = DeduplicateSelfRepeat(completedText, identity.Id);
+        RaiseScanCompleted(new ScanCompletedEventArgs(identity.Id, identity.Name, completedText, DateTime.UtcNow));
+    }
+
+    private int? ExpectedTokenLengthForScanner(ScannerEntry identity)
+        => identity.ExpectedTokenLength ?? _config.DefaultExpectedTokenLength;
+
+    /// <summary>
+    /// Satu titik pemancar ScanCompleted, dipakai baik oleh flush berbasis
+    /// panjang (TryFlushOnExpectedLength, segera saat karakter datang)
+    /// maupun flush berbasis idle-timeout (CheckCompletions, dari timer) --
+    /// supaya penanganan error "satu handler gagal tidak boleh menjatuhkan
+    /// listener device lain" konsisten di kedua jalur, bukan hanya salah
+    /// satu.
+    /// </summary>
+    private void RaiseScanCompleted(ScanCompletedEventArgs args)
+    {
+        try
+        {
+            ScanCompleted?.Invoke(args);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"ScanCompleted handler melempar exception: {ex.Message}");
+        }
     }
 
     private DeviceBuffer GetOrCreateBuffer(IntPtr hDevice)
@@ -263,19 +337,23 @@ public sealed class RawInputListener : IDisposable
 
         foreach (var (hDevice, buf) in _buffers)
         {
+            // Identity diresolusi DULUAN (sebelum cek buffer) karena timeout
+            // yang dipakai sekarang bergantung pada scanner mana ini --
+            // lihat CompletionTimeoutForScanner.
+            var identity = ResolveIdentity(hDevice);
+            if (identity is null) continue; // seharusnya tidak terjadi, jaga-jaga
+
+            var timeoutMs = CompletionTimeoutForScanner(identity);
             string? completedText = null;
 
             lock (buf.SyncRoot)
             {
                 if (buf.Text.Length == 0) continue;
-                if ((now - buf.LastKeystrokeUtc).TotalMilliseconds < CompletionTimeoutMs) continue;
+                if ((now - buf.LastKeystrokeUtc).TotalMilliseconds < timeoutMs) continue;
 
                 completedText = buf.Text.ToString();
                 buf.Text.Clear();
             }
-
-            var identity = ResolveIdentity(hDevice);
-            if (identity is null) continue; // seharusnya tidak terjadi, jaga-jaga
 
             completedText = DeduplicateSelfRepeat(completedText, identity.Id);
 
@@ -286,16 +364,7 @@ public sealed class RawInputListener : IDisposable
         if (toEmit is null) return;
         foreach (var args in toEmit)
         {
-            try
-            {
-                ScanCompleted?.Invoke(args);
-            }
-            catch (Exception ex)
-            {
-                // Satu handler yang error tidak boleh menjatuhkan listener
-                // device lain (Section AC: "Semua error harus recoverable").
-                Log.Error($"ScanCompleted handler melempar exception: {ex.Message}");
-            }
+            RaiseScanCompleted(args);
         }
     }
 

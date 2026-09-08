@@ -6,10 +6,14 @@
     "_comment_token": "OPSIONAL. Isi dengan string acak (mis. hasil `openssl rand -hex 16`) kalau ingin browser wajib mengirim token ini sebelum menerima siaran scan. Kosongkan (\"\") kalau tidak perlu -- loopback-only sudah jadi lapisan pertahanan utama.",
     "token": ""
   },
+  "_comment_defaultCompletionTimeoutMs": "Jeda diam (ms) default sebelum satu scan dianggap selesai, dipakai scanner yang TIDAK mengisi completionTimeoutMs sendiri. 80 cocok untuk unit dekat/berkabel. Kalau ada QR valid yang malah muncul 'tidak dikenali' berulang (2-3x per scan) di Log Aktivitas, itu tanda buffer kepotong -- jangan naikkan angka ini secara global, isi completionTimeoutMs pada scanner yang bermasalah saja (lihat README > Troubleshooting).",
+  "defaultCompletionTimeoutMs": 80,
+  "_comment_defaultExpectedTokenLength": "OPSIONAL tapi DIREKOMENDASIKAN untuk deployment saat ini: format qrToken proyek absensi SELALU 'STD-XXXXXXXXXXXX' (16 karakter, lihat generateQrToken() di lib/services/siswa-service.ts repo absensi). Mengisi 16 di sini membuat buffer di-flush SEGERA saat genap 16 karakter, tanpa menunggu idle-timeout -- ini mencegah dua scan cepat berurutan di scanner FISIK YANG SAMA (jam padat) tersambung jadi satu string gabungan. Kosongkan/null kalau format token berubah di kemudian hari.",
+  "defaultExpectedTokenLength": 16,
   "scanners": [
     { "id": "scanner-1", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 1" },
     { "id": "scanner-2", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 2" },
     { "id": "scanner-3", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 3" },
-    { "id": "scanner-4", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 4" }
+    { "id": "scanner-4", "devicePath": "ISI_DARI_HASIL_DISCOVER", "name": "Scanner Meja 4", "_comment_completionTimeoutMs": "Contoh: unit ini dipasang jauh dari PC lewat Bluetooth, jadi dinaikkan dari default 80ms sebagai fallback (fitur expectedTokenLength di atas sudah menutupi kasus normal, tapi idle-timeout tetap dipakai sebagai jaring pengaman kalau transmisi terputus sebelum genap 16 karakter).", "completionTimeoutMs": 250 }
   ]
 }
