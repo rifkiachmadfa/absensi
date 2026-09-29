@@ -73,7 +73,7 @@ export function ScannerFisikClient() {
       )}
 
       {stations.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {stations.map((station) => (
             <ScannerStationCard key={station.info.id} station={station} />
           ))}
