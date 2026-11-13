@@ -1,8 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { getStudentAttendanceDetail } from "@/lib/services/report-service";
+import {
+  getPeriodSlug,
+  getStudentAttendanceDetail,
+  type PeriodParams,
+} from "@/lib/services/report-service";
 import { buildStudentReportWorkbook } from "@/lib/xlsx/report-workbook";
+import { parseIsoWeek } from "@/lib/utils/week";
 
 export async function GET(
   request: NextRequest,
@@ -33,13 +38,21 @@ export async function GET(
   }
 
   const { searchParams } = new URL(request.url);
-  const mode = searchParams.get("mode") === "monthly" ? "monthly" : "daily";
+  const modeParam = searchParams.get("mode");
+  const mode = modeParam === "monthly" ? "monthly" : modeParam === "weekly" ? "weekly" : "daily";
   const date = searchParams.get("date") ?? undefined;
+  const week = searchParams.get("week") ?? undefined;
   const month = searchParams.get("month") ?? undefined;
 
   if (mode === "daily" && !date) {
     return NextResponse.json(
       { message: "Parameter 'date' wajib diisi untuk mode harian." },
+      { status: 400 }
+    );
+  }
+  if (mode === "weekly" && !parseIsoWeek(week)) {
+    return NextResponse.json(
+      { message: "Parameter 'week' wajib diisi dengan format YYYY-Www untuk mode mingguan." },
       { status: 400 }
     );
   }
@@ -51,11 +64,13 @@ export async function GET(
   }
 
   try {
-    const detail = await getStudentAttendanceDetail(
+    const periodParams: PeriodParams =
       mode === "daily"
-        ? { studentId: id, mode: "daily", date: date! }
-        : { studentId: id, mode: "monthly", month: month! }
-    );
+        ? { mode: "daily", date: date! }
+        : mode === "weekly"
+          ? { mode: "weekly", week: week! }
+          : { mode: "monthly", month: month! };
+    const detail = await getStudentAttendanceDetail({ studentId: id, ...periodParams });
 
     if (!detail) {
       return NextResponse.json({ message: "Siswa tidak ditemukan." }, { status: 404 });
@@ -67,8 +82,7 @@ export async function GET(
     const workbook = buildStudentReportWorkbook(detail, schoolName);
     const buffer = await workbook.xlsx.writeBuffer();
 
-    const periodSlug =
-      mode === "daily" ? detail.period.startDate : detail.period.startDate.slice(0, 7);
+    const periodSlug = getPeriodSlug(detail.period);
     const namaSlug = detail.student.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const fileName = `laporan-${namaSlug}-${periodSlug}.xlsx`;
 

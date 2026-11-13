@@ -11,17 +11,27 @@ import {
   isWeekendDate,
   getHolidayDateSet,
 } from "@/lib/services/attendance-service";
+import { isoWeekNumber, parseIsoWeek, toIsoWeek } from "@/lib/utils/week";
 
 
 // ============================================================
 // Types
 // ============================================================
 
-export type ReportMode = "daily" | "monthly";
+export type ReportMode = "daily" | "weekly" | "monthly";
+
+// Parameter periode. `week` memakai format minggu ISO "YYYY-Www" (sama dengan
+// nilai <input type="week">), mis. "2026-W33" = Senin 10 - Minggu 16 Agustus 2026.
+export type PeriodParams =
+  | { mode: "daily"; date: string }
+  | { mode: "weekly"; week: string }
+  | { mode: "monthly"; month: string };
+
+export type ReportParams = PeriodParams & { classId?: string };
 
 export type ReportPeriod = {
   mode: ReportMode;
-  label: string; // "Sabtu, 15 Agustus 2026" atau "Agustus 2026"
+  label: string; // "Sabtu, 15 Agustus 2026", "Minggu ke-33, 10–16 Agustus 2026", atau "Agustus 2026"
   startDate: string; // ISO date-only (YYYY-MM-DD)
   endDate: string; // ISO date-only -- untuk daily sama dengan startDate,
   // untuk monthly = akhir bulan yang DIMINTA (bukan yang sudah lewat)
@@ -71,6 +81,33 @@ export type ReportPayload = {
   overall: OverallReport;
   perClass: ClassReportRow[];
   perStudent: StudentReportRow[];
+};
+
+// Matriks kehadiran satu kelas: satu baris per siswa, satu kolom per HARI
+// SEKOLAH dalam periode (akhir pekan & hari libur tidak punya kolom). Dipakai
+// export Excel saat filter kelas dipilih.
+export type ClassMatrixDate = {
+  date: string; // YYYY-MM-DD
+  weekday: string; // "Senin".."Jumat"
+};
+
+export type ClassMatrixStudent = {
+  studentId: string;
+  name: string;
+  nis: string;
+  nisn: string;
+  // Sejajar (index per index) dengan ClassAttendanceMatrix.dates.
+  statuses: (AttendanceStatus | "BELUM_ABSEN")[];
+  counts: StatusCounts;
+  persentaseKehadiran: number; // (hadir + terlambat) / jumlah hari sekolah * 100
+};
+
+export type ClassAttendanceMatrix = {
+  period: ReportPeriod;
+  classId: string;
+  className: string;
+  dates: ClassMatrixDate[];
+  students: ClassMatrixStudent[];
 };
 
 // 1) Tambahkan checkOutAt ke tipe:
@@ -253,7 +290,7 @@ function toISODateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function formatPeriodLabel(mode: ReportMode, start: Date): string {
+function formatPeriodLabel(mode: ReportMode, start: Date, end?: Date): string {
   if (mode === "daily") {
     return new Intl.DateTimeFormat("id-ID", {
       weekday: "long",
@@ -262,6 +299,15 @@ function formatPeriodLabel(mode: ReportMode, start: Date): string {
       year: "numeric",
       timeZone: "UTC",
     }).format(start);
+  }
+  if (mode === "weekly") {
+    const range = new Intl.DateTimeFormat("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).formatRange(start, end ?? start);
+    return `Minggu ke-${isoWeekNumber(start)}, ${range}`;
   }
   return new Intl.DateTimeFormat("id-ID", {
     month: "long",
@@ -328,24 +374,30 @@ function buildEmptyReport(
 }
 
 // ============================================================
-// Report utama: gabungan Ringkasan + Per Kelas + Per Siswa.
-// Dipakai oleh halaman /laporan DAN export xlsx (satu sumber logic,
-// tidak ada perhitungan yang di-duplikasi -- Section 39.5).
+// Resolver periode -- SATU-SATUNYA tempat yang menerjemahkan parameter
+// (daily/weekly/monthly) menjadi rentang tanggal + ReportPeriod. Dipakai oleh
+// getAttendanceReport, getClassAttendanceMatrix, dan getStudentAttendanceDetail
+// supaya definisi periode (termasuk pemotongan ke "hari ini") tidak bercabang.
 // ============================================================
 
-export async function getAttendanceReport(
-  params:
-    | { mode: "daily"; date: string; classId?: string }
-    | { mode: "monthly"; month: string; classId?: string }
-): Promise<ReportPayload> {
-  const { mode, classId } = params;
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
 
+function resolveRange(params: PeriodParams) {
   let periodStart: Date;
   let periodEndRequested: Date;
 
-  if (mode === "daily") {
+  if (params.mode === "daily") {
     periodStart = new Date(`${params.date}T00:00:00.000Z`);
     periodEndRequested = periodStart;
+  } else if (params.mode === "weekly") {
+    const monday = parseIsoWeek(params.week);
+    if (!monday) throw new Error(`Format minggu tidak valid: ${params.week}`);
+    periodStart = monday;
+    periodEndRequested = addDays(monday, 6); // Senin..Minggu; akhir pekan difilter oleh isWeekendDate
   } else {
     const [yearStr, monthStr] = params.month.split("-");
     const year = Number(yearStr);
@@ -354,25 +406,62 @@ export async function getAttendanceReport(
     periodEndRequested = new Date(Date.UTC(year, monthNum, 0)); // hari terakhir bulan itu
   }
 
+  // Untuk minggu/bulan yang sedang berjalan (atau yang akan datang), jangan
+  // hitung hari-hari yang belum terjadi -- supaya persentase kehadiran tidak
+  // menyesatkan (rendah semu).
   const today = getTodayDateOnly();
-  // Untuk bulan yang sedang berjalan (atau bulan depan), jangan hitung
-  // hari-hari yang belum terjadi -- supaya persentase kehadiran tidak
-  // menyesatkan (rendah semu) di awal bulan.
   const periodEnd =
-    mode === "monthly" && periodEndRequested.getTime() > today.getTime()
+    params.mode !== "daily" && periodEndRequested.getTime() > today.getTime()
       ? today
       : periodEndRequested;
 
-  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
-  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
+  return { periodStart, periodEndRequested, periodEnd };
+}
 
-  const period: ReportPeriod = {
+function buildPeriod(
+  mode: ReportMode,
+  periodStart: Date,
+  periodEndRequested: Date,
+  schoolDays: number
+): ReportPeriod {
+  return {
     mode,
-    label: formatPeriodLabel(mode, periodStart),
+    label: formatPeriodLabel(mode, periodStart, periodEndRequested),
     startDate: toISODateOnly(periodStart),
     endDate: toISODateOnly(periodEndRequested),
     schoolDays,
   };
+}
+
+// Daftar HARI SEKOLAH (bukan akhir pekan, bukan libur) dalam rentang.
+function listSchoolDays(start: Date, end: Date, holidaySet: Set<string>): Date[] {
+  return eachDateInRange(start, end).filter(
+    (d) => !isWeekendDate(d) && !holidaySet.has(toISODateOnly(d))
+  );
+}
+
+// Potongan nama file untuk periode: "2026-08-15", "2026-W33", atau "2026-08".
+export function getPeriodSlug(period: ReportPeriod): string {
+  if (period.mode === "daily") return period.startDate;
+  if (period.mode === "weekly") return toIsoWeek(new Date(`${period.startDate}T00:00:00.000Z`));
+  return period.startDate.slice(0, 7);
+}
+
+// ============================================================
+// Report utama: gabungan Ringkasan + Per Kelas + Per Siswa.
+// Dipakai oleh halaman /laporan DAN export xlsx (satu sumber logic,
+// tidak ada perhitungan yang di-duplikasi -- Section 39.5).
+// ============================================================
+
+export async function getAttendanceReport(params: ReportParams): Promise<ReportPayload> {
+  const { mode, classId } = params;
+
+  const { periodStart, periodEndRequested, periodEnd } = resolveRange(params);
+
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
+
+  const period = buildPeriod(mode, periodStart, periodEndRequested, schoolDays);
 
   const classes = await prisma.class.findMany({
     where: { status: ClassStatus.ACTIVE, ...(classId ? { id: classId } : {}) },
@@ -476,14 +565,86 @@ export async function getAttendanceReport(
 }
 
 // ============================================================
+// Matriks kehadiran satu kelas (siswa x tanggal) -- dipakai export Excel
+// saat filter kelas dipilih. Satu query attendance untuk seluruh siswa kelas
+// (bukan N+1), lalu di-lookup per (siswa, tanggal). Persentase memakai rumus
+// yang SAMA dengan getAttendanceReport: (HADIR + TERLAMBAT) / hari sekolah.
+// ============================================================
+
+export async function getClassAttendanceMatrix(
+  params: PeriodParams & { classId: string }
+): Promise<ClassAttendanceMatrix | null> {
+  const { mode, classId } = params;
+
+  const kelas = await prisma.class.findUnique({
+    where: { id: classId },
+    select: {
+      id: true,
+      name: true,
+      students: {
+        where: { status: StudentStatus.ACTIVE },
+        select: { id: true, name: true, nis: true, nisn: true },
+        orderBy: { name: "asc" },
+      },
+    },
+  });
+  if (!kelas) return null;
+
+  const { periodStart, periodEndRequested, periodEnd } = resolveRange(params);
+
+  const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
+  const schoolDates = listSchoolDays(periodStart, periodEnd, holidaySet);
+  const period = buildPeriod(mode, periodStart, periodEndRequested, schoolDates.length);
+
+  const dates: ClassMatrixDate[] = schoolDates.map((d) => ({
+    date: toISODateOnly(d),
+    weekday: WEEKDAY_LABEL[d.getUTCDay()],
+  }));
+
+  const statusByStudentDate = new Map<string, AttendanceStatus>();
+  if (dates.length > 0 && kelas.students.length > 0) {
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        studentId: { in: kelas.students.map((s) => s.id) },
+        date: { gte: periodStart, lte: periodEnd },
+      },
+      select: { studentId: true, date: true, status: true },
+    });
+    for (const a of attendances) {
+      statusByStudentDate.set(`${a.studentId}|${toISODateOnly(a.date)}`, a.status);
+    }
+  }
+
+  const students: ClassMatrixStudent[] = kelas.students.map((s) => {
+    const statuses = dates.map(
+      (d) => statusByStudentDate.get(`${s.id}|${d.date}`) ?? ("BELUM_ABSEN" as const)
+    );
+    const counts = tallyStatuses(statuses.filter((x): x is AttendanceStatus => x !== "BELUM_ABSEN"));
+    const belumAbsen = statuses.filter((x) => x === "BELUM_ABSEN").length;
+    return {
+      studentId: s.id,
+      name: s.name,
+      nis: s.nis,
+      nisn: s.nisn ?? "-",
+      statuses,
+      counts: { ...counts, belumAbsen },
+      persentaseKehadiran:
+        dates.length > 0
+          ? Math.round(((counts.hadir + counts.terlambat) / dates.length) * 100)
+          : 0,
+    };
+  });
+
+  return { period, classId: kelas.id, className: kelas.name, dates, students };
+}
+
+// ============================================================
 // Detail kehadiran satu siswa (log harian) untuk periode yang sama
 // dengan halaman /laporan -- dipakai oleh /laporan/siswa/[id].
 // ============================================================
 
 export async function getStudentAttendanceDetail(
-  params:
-    | { studentId: string; mode: "daily"; date: string }
-    | { studentId: string; mode: "monthly"; month: string }
+  params: { studentId: string } & PeriodParams
 ): Promise<StudentReportDetail | null> {
   const student = await prisma.student.findUnique({
     where: { id: params.studentId },
@@ -499,36 +660,12 @@ export async function getStudentAttendanceDetail(
   if (!student) return null;
 
   const { mode } = params;
-  let periodStart: Date;
-  let periodEndRequested: Date;
-
-  if (mode === "daily") {
-    periodStart = new Date(`${params.date}T00:00:00.000Z`);
-    periodEndRequested = periodStart;
-  } else {
-    const [yearStr, monthStr] = params.month.split("-");
-    const year = Number(yearStr);
-    const monthNum = Number(monthStr);
-    periodStart = new Date(Date.UTC(year, monthNum - 1, 1));
-    periodEndRequested = new Date(Date.UTC(year, monthNum, 0));
-  }
-
-  const today = getTodayDateOnly();
-  const periodEnd =
-    mode === "monthly" && periodEndRequested.getTime() > today.getTime()
-      ? today
-      : periodEndRequested;
+  const { periodStart, periodEndRequested, periodEnd } = resolveRange(params);
 
   const holidaySet = await getHolidayDateSet(periodStart, periodEnd);
   const schoolDays = countSchoolDays(periodStart, periodEnd, holidaySet);
 
-  const period: ReportPeriod = {
-    mode,
-    label: formatPeriodLabel(mode, periodStart),
-    startDate: toISODateOnly(periodStart),
-    endDate: toISODateOnly(periodEndRequested),
-    schoolDays,
-  };
+  const period = buildPeriod(mode, periodStart, periodEndRequested, schoolDays);
 
   const attendances =
     schoolDays > 0

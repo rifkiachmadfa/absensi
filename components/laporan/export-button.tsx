@@ -8,11 +8,13 @@ import { Spinner } from "@/components/ui/spinner";
 export function ExportButton({
   mode,
   date,
+  week,
   month,
   classId,
 }: {
-  mode: "daily" | "monthly";
+  mode: "daily" | "weekly" | "monthly";
   date: string;
+  week: string;
   month: string;
   classId?: string;
 }) {
@@ -23,6 +25,7 @@ export function ExportButton({
     try {
       const params = new URLSearchParams({ mode });
       if (mode === "daily") params.set("date", date);
+      else if (mode === "weekly") params.set("week", week);
       else params.set("month", month);
       if (classId) params.set("classId", classId);
 

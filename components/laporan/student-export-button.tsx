@@ -9,11 +9,13 @@ export function StudentExportButton({
   studentId,
   mode,
   date,
+  week,
   month,
 }: {
   studentId: string;
-  mode: "daily" | "monthly";
+  mode: "daily" | "weekly" | "monthly";
   date: string;
+  week: string;
   month: string;
 }) {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -23,6 +25,7 @@ export function StudentExportButton({
     try {
       const params = new URLSearchParams({ mode });
       if (mode === "daily") params.set("date", date);
+      else if (mode === "weekly") params.set("week", week);
       else params.set("month", month);
 
       const res = await fetch(`/api/laporan/siswa/${studentId}/export?${params.toString()}`);

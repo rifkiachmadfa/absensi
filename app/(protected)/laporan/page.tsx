@@ -5,6 +5,7 @@ import {
   getReportClassOptions,
 } from "@/lib/services/report-service";
 import { getTodayDateOnly } from "@/lib/services/attendance-service";
+import { parseIsoWeek, toIsoWeek } from "@/lib/utils/week";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -28,6 +29,7 @@ export default async function LaporanPage({
   searchParams: Promise<{
     mode?: string;
     date?: string;
+    week?: string;
     month?: string;
     classId?: string;
   }>;
@@ -39,8 +41,11 @@ export default async function LaporanPage({
   const raw = await searchParams;
 
   const today = getTodayDateOnly();
-  const mode = raw.mode === "monthly" ? "monthly" : "daily";
+  const mode = raw.mode === "monthly" ? "monthly" : raw.mode === "weekly" ? "weekly" : "daily";
   const date = raw.date || toISODateOnly(today);
+  // Nilai week yang tidak valid (mis. diketik manual di URL) jatuh ke minggu ini.
+  const currentWeek = toIsoWeek(today);
+  const week = parseIsoWeek(raw.week) ? raw.week! : currentWeek;
   const month = raw.month || toISODateOnly(today).slice(0, 7);
   const classId = raw.classId || undefined;
 
@@ -48,16 +53,19 @@ export default async function LaporanPage({
     getAttendanceReport(
       mode === "daily"
         ? { mode: "daily", date, classId }
-        : { mode: "monthly", month, classId }
+        : mode === "weekly"
+          ? { mode: "weekly", week, classId }
+          : { mode: "monthly", month, classId }
     ),
     getReportClassOptions(),
   ]);
 
   const query = (overrides: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
-    const merged = { mode, date, month, classId: raw.classId, ...overrides };
+    const merged = { mode, date, week, month, classId: raw.classId, ...overrides };
     if (merged.mode) params.set("mode", merged.mode);
     if (merged.mode === "daily" && merged.date) params.set("date", merged.date);
+    if (merged.mode === "weekly" && merged.week) params.set("week", merged.week);
     if (merged.mode === "monthly" && merged.month) params.set("month", merged.month);
     if (merged.classId) params.set("classId", merged.classId);
     return `/laporan?${params.toString()}`;
@@ -70,7 +78,7 @@ export default async function LaporanPage({
           <h1 className="text-2xl font-semibold text-foreground">Laporan Absensi</h1>
           <p className="text-sm text-muted-foreground">{report.period.label}</p>
         </div>
-        <ExportButton mode={mode} date={date} month={month} classId={classId} />
+        <ExportButton mode={mode} date={date} week={week} month={month} classId={classId} />
       </div>
 
       <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
@@ -84,6 +92,14 @@ export default async function LaporanPage({
               render={<Link href={query({ mode: "daily" })} />}
             >
               Harian
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "weekly" ? "default" : "outline"}
+              render={<Link href={query({ mode: "weekly" })} />}
+            >
+              Mingguan
             </Button>
             <Button
               type="button"
@@ -108,6 +124,17 @@ export default async function LaporanPage({
                 name="date"
                 defaultValue={date}
                 max={toISODateOnly(today)}
+              />
+            </div>
+          ) : mode === "weekly" ? (
+            <div className="space-y-1">
+              <Label htmlFor="week">Minggu</Label>
+              <Input
+                id="week"
+                type="week"
+                name="week"
+                defaultValue={week}
+                max={currentWeek}
               />
             </div>
           ) : (
@@ -145,6 +172,13 @@ export default async function LaporanPage({
           </Button>
         </form>
       </div>
+
+      {!classId && (
+        <p className="text-sm text-muted-foreground">
+          Pilih satu kelas lalu klik Terapkan agar file Excel memuat rekap per siswa untuk setiap
+          tanggal.
+        </p>
+      )}
 
       <ReportTabs report={report} />
     </div>

@@ -1,13 +1,19 @@
 // lib/xlsx/report-workbook.ts
 import "server-only";
 import ExcelJS from "exceljs";
-import type { ReportPayload, StudentReportDetail } from "@/lib/services/report-service";
+import type {
+  ClassAttendanceMatrix,
+  ReportPayload,
+  ReportPeriod,
+  StatusCounts,
+  StudentReportDetail,
+} from "@/lib/services/report-service";
 import { STATUS_LABEL } from "@/lib/constants/attendance";
 
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: "pattern",
   pattern: "solid",
-  fgColor: { argb: "FF2563EB" }, // primary blue -- UI_RULES §3
+  fgColor: { argb: "FF22949E" }, // Yadika Teal (brand primary) -- UI_RULES §3
 };
 
 const HEADER_FONT: Partial<ExcelJS.Font> = {
@@ -61,15 +67,246 @@ function addTitleBlock(
   sheet.addRow([]); // baris kosong pemisah antara judul dan header tabel
 }
 
-export function buildReportWorkbook(report: ReportPayload, schoolName: string): ExcelJS.Workbook {
+// Subjudul periode yang dipakai bersama oleh semua workbook laporan.
+function describePeriod(period: ReportPeriod): string {
+  if (period.mode === "daily") return `Laporan Harian — ${period.label}`;
+  const kind = period.mode === "weekly" ? "Mingguan" : "Bulanan";
+  return `Laporan ${kind} — ${period.label} (${period.schoolDays} hari sekolah)`;
+}
+
+// ============================================================
+// Sheet matriks kehadiran kelas: baris = siswa, kolom = tanggal (hari sekolah),
+// diakhiri total per status + total masuk + persentase kehadiran. Kolom total
+// berupa RUMUS Excel (COUNTIF) dengan nilai awal terisi, sehingga bila
+// wali kelas mengoreksi satu sel status, totalnya ikut berubah.
+// ============================================================
+
+const STATUS_CODE: Record<string, string> = {
+  HADIR: "H",
+  TERLAMBAT: "T",
+  SAKIT: "S",
+  IZIN: "I",
+  DISPENSASI: "D",
+  ALPHA: "A",
+  BELUM_ABSEN: "-",
+};
+
+// Warna status mengikuti UI_RULES §5 (success / warning / danger / info).
+const STATUS_CELL_STYLE: Record<string, { fill: string; font: string }> = {
+  H: { fill: "FFF0FDF4", font: "FF16A34A" },
+  T: { fill: "FFFFFBEB", font: "FFD97706" },
+  S: { fill: "FFEAF7F8", font: "FF17586F" },
+  I: { fill: "FFEAF7F8", font: "FF17586F" },
+  D: { fill: "FFEAF7F8", font: "FF17586F" },
+  A: { fill: "FFFEF2F2", font: "FFDC2626" },
+  "-": { fill: "FFF1F5F5", font: "FF71858C" },
+};
+
+// Urutan kolom total per status. HADIR & TERLAMBAT WAJIB berada di dua posisi
+// pertama karena kolom "Total Masuk" menjumlahkan keduanya.
+const SUMMARY_COLUMNS: { header: string; code: string; pick: (c: StatusCounts) => number }[] = [
+  { header: "Hadir", code: "H", pick: (c) => c.hadir },
+  { header: "Terlambat", code: "T", pick: (c) => c.terlambat },
+  { header: "Sakit", code: "S", pick: (c) => c.sakit },
+  { header: "Izin", code: "I", pick: (c) => c.izin },
+  { header: "Dispensasi", code: "D", pick: (c) => c.dispensasi },
+  { header: "Alpha", code: "A", pick: (c) => c.alpha },
+];
+
+const FIXED_COLUMNS = 3; // No, Nama, NIS
+
+// Sel berisi rumus + nilai hasil awal (supaya terbaca di viewer yang tidak
+// menghitung ulang). `date1904` wajib di typings exceljs 3.4; false = default Excel.
+function formulaCell(formula: string, result: number): ExcelJS.CellFormulaValue {
+  return { formula, result, date1904: false };
+}
+
+// "2026-02-01" -> "1/2/26"
+function formatShortDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return `${Number(day)}/${Number(month)}/${year.slice(2)}`;
+}
+
+function addClassMatrixSheet(
+  workbook: ExcelJS.Workbook,
+  matrix: ClassAttendanceMatrix,
+  schoolName: string
+) {
+  const dateCount = matrix.dates.length;
+  const firstDateCol = FIXED_COLUMNS + 1;
+  const lastDateCol = FIXED_COLUMNS + Math.max(dateCount, 1);
+  const summaryStartCol = lastDateCol + 1;
+  // Kolom ringkasan: 6 status + Belum Diisi + Total Masuk + % Kehadiran
+  const totalMasukCol = summaryStartCol + SUMMARY_COLUMNS.length + 1;
+  const percentCol = totalMasukCol + 1;
+  const columnCount = percentCol;
+
+  const sheet = workbook.addWorksheet("Rekap Kelas", {
+    views: [{ state: "frozen", xSplit: 2, ySplit: 5 }],
+    pageSetup: {
+      orientation: "landscape",
+      paperSize: 9, // A4
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      printTitlesRow: "4:5",
+    },
+  });
+
+  const letter = (col: number) => sheet.getColumn(col).letter;
+
+  sheet.getColumn(1).width = 5;
+  sheet.getColumn(2).width = 30;
+  sheet.getColumn(3).width = 12;
+  for (let c = firstDateCol; c <= lastDateCol; c++) sheet.getColumn(c).width = 9;
+  for (let c = summaryStartCol; c <= totalMasukCol; c++) sheet.getColumn(c).width = 11;
+  sheet.getColumn(percentCol).width = 13;
+
+  addTitleBlock(
+    sheet,
+    schoolName,
+    `Rekap Kehadiran Kelas ${matrix.className} — ${describePeriod(matrix.period)}`,
+    columnCount
+  );
+
+  // ---- Header 2 baris: baris 4 = tanggal / judul kolom, baris 5 = nama hari ----
+  const headerTop = sheet.getRow(4);
+  const headerBottom = sheet.getRow(5);
+
+  const fixedHeaders = ["No", "Nama Siswa", "NIS"];
+  fixedHeaders.forEach((text, i) => {
+    headerTop.getCell(i + 1).value = text;
+    sheet.mergeCells(4, i + 1, 5, i + 1);
+  });
+
+  if (dateCount === 0) {
+    headerTop.getCell(firstDateCol).value = "Tanggal";
+    headerBottom.getCell(firstDateCol).value = "-";
+  } else {
+    matrix.dates.forEach((d, i) => {
+      headerTop.getCell(firstDateCol + i).value = formatShortDate(d.date);
+      headerBottom.getCell(firstDateCol + i).value = d.weekday.slice(0, 3);
+    });
+  }
+
+  const summaryHeaders = [
+    ...SUMMARY_COLUMNS.map((c) => c.header),
+    "Belum Diisi",
+    "Total Masuk",
+    "% Kehadiran",
+  ];
+  summaryHeaders.forEach((text, i) => {
+    const col = summaryStartCol + i;
+    headerTop.getCell(col).value = text;
+    sheet.mergeCells(4, col, 5, col);
+  });
+
+  styleHeaderRow(headerTop);
+  styleHeaderRow(headerBottom);
+  headerBottom.eachCell((cell) => {
+    cell.font = { ...HEADER_FONT, size: 9 };
+  });
+  headerTop.height = 22;
+  headerBottom.height = 16;
+
+  // ---- Baris data ----
+  const dateRangeFor = (row: number) =>
+    `${letter(firstDateCol)}${row}:${letter(lastDateCol)}${row}`;
+
+  if (matrix.students.length === 0) {
+    sheet.mergeCells(6, 1, 6, columnCount);
+    const empty = sheet.getCell(6, 1);
+    empty.value = "Tidak ada siswa aktif di kelas ini.";
+    empty.font = { italic: true, color: { argb: "FF71858C" } };
+    empty.alignment = { horizontal: "center" };
+  }
+
+  matrix.students.forEach((siswa, index) => {
+    const rowNumber = 6 + index;
+    const row = sheet.getRow(rowNumber);
+
+    row.getCell(1).value = index + 1;
+    row.getCell(2).value = siswa.name;
+    row.getCell(3).value = siswa.nis;
+    row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+
+    siswa.statuses.forEach((status, i) => {
+      const code = STATUS_CODE[status] ?? "-";
+      const cell = row.getCell(firstDateCol + i);
+      const style = STATUS_CELL_STYLE[code];
+      cell.value = code;
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.font = { bold: true, color: { argb: style.font } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: style.fill } };
+    });
+
+    const range = dateRangeFor(rowNumber);
+    SUMMARY_COLUMNS.forEach((col, i) => {
+      row.getCell(summaryStartCol + i).value = formulaCell(
+        `COUNTIF(${range},"${col.code}")`,
+        col.pick(siswa.counts)
+      );
+    });
+
+    const firstSummary = letter(summaryStartCol);
+    const lastStatusSummary = letter(summaryStartCol + SUMMARY_COLUMNS.length - 1);
+    const belumCol = summaryStartCol + SUMMARY_COLUMNS.length;
+    row.getCell(belumCol).value = formulaCell(
+      `${dateCount}-SUM(${firstSummary}${rowNumber}:${lastStatusSummary}${rowNumber})`,
+      siswa.counts.belumAbsen
+    );
+
+    const totalMasuk = siswa.counts.hadir + siswa.counts.terlambat;
+    row.getCell(totalMasukCol).value = formulaCell(
+      `${letter(summaryStartCol)}${rowNumber}+${letter(summaryStartCol + 1)}${rowNumber}`,
+      totalMasuk
+    );
+    row.getCell(percentCol).value = formulaCell(
+      dateCount > 0 ? `${letter(totalMasukCol)}${rowNumber}/${dateCount}` : "0",
+      dateCount > 0 ? totalMasuk / dateCount : 0
+    );
+    row.getCell(percentCol).numFmt = "0%";
+
+    for (let c = summaryStartCol; c <= percentCol; c++) {
+      row.getCell(c).alignment = { horizontal: "center", vertical: "middle" };
+    }
+    row.getCell(totalMasukCol).font = { bold: true };
+    row.getCell(percentCol).font = { bold: true };
+
+    styleDataRow(row);
+  });
+
+  // ---- Keterangan kode status ----
+  const legendRow = 6 + Math.max(matrix.students.length, 1) + 1;
+  sheet.mergeCells(legendRow, 1, legendRow, columnCount);
+  const legend = sheet.getCell(legendRow, 1);
+  legend.value =
+    "Keterangan: H = Hadir, T = Terlambat, S = Sakit, I = Izin, D = Dispensasi, A = Alpha, - = Belum diisi. " +
+    "Persentase kehadiran = (Hadir + Terlambat) / jumlah hari sekolah pada periode.";
+  legend.font = { italic: true, size: 9, color: { argb: "FF48616A" } };
+  legend.alignment = { wrapText: true, vertical: "top" };
+  sheet.getRow(legendRow).height = 28;
+}
+
+export function buildReportWorkbook(
+  report: ReportPayload,
+  schoolName: string,
+  classMatrix?: ClassAttendanceMatrix
+): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = schoolName;
   workbook.created = new Date();
 
-  const periodSubtitle =
-    report.period.mode === "daily"
-      ? `Laporan Harian — ${report.period.label}`
-      : `Laporan Bulanan — ${report.period.label} (${report.period.schoolDays} hari sekolah)`;
+  const periodSubtitle = describePeriod(report.period);
+
+  // Saat filter kelas dipilih, sheet matriks (siswa x tanggal) menjadi sheet
+  // pertama; sheet Ringkasan / Per Kelas / Per Siswa tetap ada setelahnya.
+  if (classMatrix) {
+    addClassMatrixSheet(workbook, classMatrix, schoolName);
+    // Paksa Excel menghitung ulang rumus total saat file dibuka.
+    workbook.calcProperties.fullCalcOnLoad = true;
+  }
 
   // ============================================================
   // Sheet 1: Ringkasan
@@ -222,10 +459,7 @@ export function buildStudentReportWorkbook(
   workbook.creator = schoolName;
   workbook.created = new Date();
 
-  const periodSubtitle =
-    detail.period.mode === "daily"
-      ? `Laporan Harian — ${detail.period.label}`
-      : `Laporan Bulanan — ${detail.period.label} (${detail.period.schoolDays} hari sekolah)`;
+  const periodSubtitle = describePeriod(detail.period);
   const studentSubtitle = `${detail.student.name} — NIS ${detail.student.nis} — NISN ${detail.student.nisn} — ${detail.student.className}`;
 
   // ============================================================

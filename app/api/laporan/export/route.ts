@@ -1,8 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { getAttendanceReport } from "@/lib/services/report-service";
+import {
+  getAttendanceReport,
+  getClassAttendanceMatrix,
+  getPeriodSlug,
+  type PeriodParams,
+} from "@/lib/services/report-service";
 import { buildReportWorkbook } from "@/lib/xlsx/report-workbook";
+import { parseIsoWeek } from "@/lib/utils/week";
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
@@ -14,8 +20,10 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const mode = searchParams.get("mode") === "monthly" ? "monthly" : "daily";
+  const modeParam = searchParams.get("mode");
+  const mode = modeParam === "monthly" ? "monthly" : modeParam === "weekly" ? "weekly" : "daily";
   const date = searchParams.get("date") ?? undefined;
+  const week = searchParams.get("week") ?? undefined;
   const month = searchParams.get("month") ?? undefined;
 
   let classId = searchParams.get("classId") ?? undefined;
@@ -41,6 +49,12 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
+  if (mode === "weekly" && !parseIsoWeek(week)) {
+    return NextResponse.json(
+      { message: "Parameter 'week' wajib diisi dengan format YYYY-Www untuk mode mingguan." },
+      { status: 400 }
+    );
+  }
   if (mode === "monthly" && !month) {
     return NextResponse.json(
       { message: "Parameter 'month' wajib diisi untuk mode bulanan." },
@@ -49,21 +63,31 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const report = await getAttendanceReport(
+    const periodParams: PeriodParams =
       mode === "daily"
-        ? { mode: "daily", date: date!, classId }
-        : { mode: "monthly", month: month!, classId }
-    );
+        ? { mode: "daily", date: date! }
+        : mode === "weekly"
+          ? { mode: "weekly", week: week! }
+          : { mode: "monthly", month: month! };
+
+    const report = await getAttendanceReport({ ...periodParams, classId });
+
+    // Filter kelas dipilih -> tambahkan sheet matriks siswa x tanggal.
+    const classMatrix = classId
+      ? await getClassAttendanceMatrix({ ...periodParams, classId })
+      : null;
 
     const setting = await prisma.schoolSetting.findFirst({ select: { schoolName: true } });
     const schoolName = setting?.schoolName?.trim() || "Sistem Absensi Siswa";
 
-    const workbook = buildReportWorkbook(report, schoolName);
+    const workbook = buildReportWorkbook(report, schoolName, classMatrix ?? undefined);
     const buffer = await workbook.xlsx.writeBuffer();
 
-    const periodSlug =
-      mode === "daily" ? report.period.startDate : report.period.startDate.slice(0, 7);
-    const fileName = `laporan-absensi-${periodSlug}.xlsx`;
+    const periodSlug = getPeriodSlug(report.period);
+    const classSlug = classMatrix
+      ? `-${classMatrix.className.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
+      : "";
+    const fileName = `laporan-absensi${classSlug}-${periodSlug}.xlsx`;
 
     return new NextResponse(buffer as unknown as BodyInit, {
       status: 200,

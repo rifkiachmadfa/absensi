@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getStudentAttendanceDetail } from "@/lib/services/report-service";
 import { getTodayDateOnly } from "@/lib/services/attendance-service";
+import { parseIsoWeek, toIsoWeek } from "@/lib/utils/week";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,33 +39,42 @@ export default async function LaporanSiswaDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ mode?: string; date?: string; month?: string }>;
+  searchParams: Promise<{ mode?: string; date?: string; week?: string; month?: string }>;
 }) {
     await requireAuth();
   const { id } = await params;
   const raw = await searchParams;
 
   const today = getTodayDateOnly();
-  const mode = raw.mode === "monthly" ? "monthly" : "daily";
+  const mode = raw.mode === "monthly" ? "monthly" : raw.mode === "weekly" ? "weekly" : "daily";
   const date = raw.date || toISODateOnly(today);
+  const currentWeek = toIsoWeek(today);
+  const week = parseIsoWeek(raw.week) ? raw.week! : currentWeek;
   const month = raw.month || toISODateOnly(today).slice(0, 7);
 
   const detail = await getStudentAttendanceDetail(
-    mode === "daily" ? { studentId: id, mode: "daily", date } : { studentId: id, mode: "monthly", month }
+    mode === "daily"
+      ? { studentId: id, mode: "daily", date }
+      : mode === "weekly"
+        ? { studentId: id, mode: "weekly", week }
+        : { studentId: id, mode: "monthly", month }
   );
 
   if (!detail) {
     notFound();
   }
 
-  const backHref = `/laporan?mode=${mode}${mode === "daily" ? `&date=${date}` : `&month=${month}`}`;
+  const backHref = `/laporan?mode=${mode}&${
+    mode === "daily" ? `date=${date}` : mode === "weekly" ? `week=${week}` : `month=${month}`
+  }`;
 
-  // Dipakai oleh tombol toggle mode (Harian/Bulanan) agar date/month yang
+  // Dipakai oleh tombol toggle mode (Harian/Mingguan/Bulanan) agar date/week/month yang
   // sedang aktif tetap terbawa saat berpindah mode.
-  const modeQuery = (nextMode: "daily" | "monthly") => {
+  const modeQuery = (nextMode: "daily" | "weekly" | "monthly") => {
     const params = new URLSearchParams();
     params.set("mode", nextMode);
     if (nextMode === "daily") params.set("date", date);
+    else if (nextMode === "weekly") params.set("week", week);
     else params.set("month", month);
     return `/laporan/siswa/${id}?${params.toString()}`;
   };
@@ -82,10 +92,10 @@ export default async function LaporanSiswaDetailPage({
           </p>
           <p className="mt-1 text-sm text-muted-foreground">{detail.period.label}</p>
         </div>
-        <StudentExportButton studentId={id} mode={mode} date={date} month={month} />
+        <StudentExportButton studentId={id} mode={mode} date={date} week={week} month={month} />
       </div>
 
-      {/* Filter: mode Harian/Bulanan + pemilih tanggal/bulan, mengikuti pola
+      {/* Filter: mode Harian/Mingguan/Bulanan + pemilih tanggal/minggu/bulan, mengikuti pola
           filter di halaman /laporan agar konsisten. */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
         <div className="space-y-1">
@@ -98,6 +108,14 @@ export default async function LaporanSiswaDetailPage({
               render={<Link href={modeQuery("daily")} />}
             >
               Harian
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "weekly" ? "default" : "outline"}
+              render={<Link href={modeQuery("weekly")} />}
+            >
+              Mingguan
             </Button>
             <Button
               type="button"
@@ -122,6 +140,17 @@ export default async function LaporanSiswaDetailPage({
                 name="date"
                 defaultValue={date}
                 max={toISODateOnly(today)}
+              />
+            </div>
+          ) : mode === "weekly" ? (
+            <div className="space-y-1">
+              <Label htmlFor="week">Minggu</Label>
+              <Input
+                id="week"
+                type="week"
+                name="week"
+                defaultValue={week}
+                max={currentWeek}
               />
             </div>
           ) : (

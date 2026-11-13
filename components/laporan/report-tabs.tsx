@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ReportPayload } from "@/lib/services/report-service";
+import { toIsoWeek } from "@/lib/utils/week";
 
 function Pct({ value }: { value: number }) {
   const tone =
@@ -30,7 +31,11 @@ function SummaryCard({ label, value }: { label: string; value: string | number }
 export function ReportTabs({ report }: { report: ReportPayload }) {
   const { overall, perClass, perStudent, period } = report;
   const detailQuery =
-    period.mode === "daily" ? `mode=daily&date=${period.startDate}` : `mode=monthly&month=${period.startDate.slice(0, 7)}`;
+    period.mode === "daily"
+      ? `mode=daily&date=${period.startDate}`
+      : period.mode === "weekly"
+        ? `mode=weekly&week=${toIsoWeek(new Date(`${period.startDate}T00:00:00.000Z`))}`
+        : `mode=monthly&month=${period.startDate.slice(0, 7)}`;
 
   return (
     <Tabs defaultValue="ringkasan">
@@ -52,7 +57,7 @@ export function ReportTabs({ report }: { report: ReportPayload }) {
           <SummaryCard label="Alpha" value={overall.alpha} />
         </div>
         <p className="text-sm text-muted-foreground">
-          {period.mode === "monthly"
+          {period.mode !== "daily"
             ? `${period.schoolDays} hari sekolah (Senin–Jumat) terhitung dalam periode ini.`
             : period.schoolDays === 0
               ? "Tanggal ini adalah akhir pekan (bukan hari sekolah)."
